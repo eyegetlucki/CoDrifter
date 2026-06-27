@@ -1,0 +1,461 @@
+# DriftLine — AI Voice Co-Driver for Assetto Corsa
+
+## Read This First
+
+This is the master project document for DriftLine. Read this entire file before touching any code, any file, or any configuration. Every Claude Code session starts here.
+
+---
+
+## Project Overview
+
+DriftLine is a real-time AI voice co-driver for Assetto Corsa. It reads live telemetry from the game via shared memory, predicts driving mistakes before they become lap time, calls them out via ElevenLabs voice in under 300ms, and generates a full Claude-powered debrief after every session.
+
+This is a local Windows application — it runs alongside Assetto Corsa on the same machine. It is not a web app, not a server, and not deployed to the cloud. All real-time processing happens locally. Only the ElevenLabs and Anthropic API calls go over the network.
+
+**Developer:** Laitrell Uy-Xayachak
+**Contact:** laitrell.company@gmail.com
+**GitHub:** github.com/eyegetlucki/DriftLine
+
+---
+
+## The Vision
+
+A driver launches Assetto Corsa, starts a session, and runs `python main.py` in a terminal. DriftLine connects to the game via shared memory and starts reading telemetry at 60hz.
+
+As the driver approaches Turn 3 carrying too much speed, the co-driver says:
+> "Brake now — you're carrying too much speed into Turn 3."
+
+The call happens under 300ms from mistake detection to first audio byte. It feels like a real co-driver is watching.
+
+After the session ends, Claude reads the full telemetry log and generates a structured debrief:
+- Best and worst sectors
+- Which mistakes occurred most
+- Lap time consistency score
+- Top 3 actionable improvements
+- Comparison to the previous session
+
+Everything is automatic. The driver just drives.
+
+---
+
+## Architecture
+
+```
+Assetto Corsa (running on Windows)
+        |
+        | Windows Shared Memory
+        v
+telemetry/reader.py
+Reads 60 telemetry fields at 60hz
+Logs every frame to CSV
+        |
+        | TelemetryFrame dataclass (60hz)
+        v
+prediction/model.py
+XGBoost classifier
+Detects mistake type per frame
+Inference must complete in < 5ms
+        |
+        | MistakePrediction (type + confidence)
+        v
+voice/coach.py
+ElevenLabs Flash v2.5
+Cooldown logic prevents voice spam
+Latency target: < 300ms
+        |
+        | Audio output to speakers
+        v
+[Session ends]
+        |
+        | Full session CSV
+        v
+debrief/claude_debrief.py
+Claude Sonnet analyzes session
+Structured JSON debrief
+Printed to terminal
+```
+
+---
+
+## Tech Stack
+
+| Component | Technology | Notes |
+|---|---|---|
+| Language | Python 3.11 | Primary language for everything |
+| Telemetry | AC Shared Memory via sim_info.py | Do not modify sim_info.py |
+| ML Model | XGBoost | Real-time inference < 5ms per frame |
+| Voice | ElevenLabs Flash v2.5 | Only Flash — standard models too slow |
+| AI Debrief | Claude Sonnet via Anthropic API | Post-session only, not real-time |
+| Data Storage | CSV per session, local | Stored in data/sessions/ |
+| IDE | VS Code or Cursor | Windows only — shared memory is Windows-specific |
+| Version Control | GitHub | github.com/eyegetlucki/DriftLine |
+
+---
+
+## Project Structure
+
+```
+DriftLine/
+|
+├── CLAUDE.md                       # This file — read before every session
+├── main.py                         # Entry point — orchestrates all components
+├── requirements.txt                # All dependencies with exact pinned versions
+├── .env                            # API keys — NEVER commit this file
+├── .gitignore                      # Excludes .env, venv/, data/, models/
+├── README.md                       # Public GitHub README
+│
+├── telemetry/
+│   ├── __init__.py
+│   ├── sim_info.py                 # AC shared memory interface — DO NOT MODIFY
+│   ├── reader.py                   # Reads shared memory at 60hz continuous loop
+│   └── models.py                   # TelemetryFrame dataclass definition
+│
+├── prediction/
+│   ├── __init__.py
+│   ├── features.py                 # Feature engineering from raw telemetry frames
+│   ├── labels.py                   # Threshold-based auto-labeling for training data
+│   ├── trainer.py                  # Offline XGBoost training script — not real-time
+│   └── model.py                    # Loads trained model, runs real-time inference
+│
+├── voice/
+│   ├── __init__.py
+│   ├── callouts.py                 # Callout text templates per mistake type
+│   ├── cooldown.py                 # Prevents voice spam — cooldown per mistake type
+│   └── coach.py                    # ElevenLabs Flash v2.5 API integration
+│
+├── debrief/
+│   ├── __init__.py
+│   └── claude_debrief.py          # Post-session Claude Sonnet analysis
+│
+├── data/
+│   ├── sessions/                   # Auto-generated CSV per session
+│   └── training/                   # Labeled training data for XGBoost
+│
+└── models/
+    └── mistake_predictor.pkl       # Trained XGBoost model — generated by trainer.py
+```
+
+---
+
+## Environment Variables
+
+Stored in `.env` in the project root. Never commit this file.
+
+```
+ELEVENLABS_API_KEY=your_key_here
+ELEVENLABS_VOICE_ID=your_voice_id_here
+ANTHROPIC_API_KEY=your_key_here
+```
+
+Load in every module that needs them:
+```python
+from dotenv import load_dotenv
+import os
+load_dotenv()
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
+```
+
+---
+
+## Telemetry Fields
+
+All fields read from AC shared memory via sim_info.py every frame at 60hz.
+
+| Field | Type | Description |
+|---|---|---|
+| speed_kmh | float | Current speed in km/h |
+| throttle | float | Throttle input 0.0 to 1.0 |
+| brake | float | Brake input 0.0 to 1.0 |
+| steering_angle | float | Steering input -1.0 to 1.0 |
+| gear | int | Current gear 0 to 7 |
+| rpm | float | Engine RPM |
+| lap_time_ms | int | Current lap time in milliseconds |
+| last_lap_ms | int | Previous lap time in milliseconds |
+| best_lap_ms | int | Best lap time in milliseconds |
+| sector_index | int | Current sector 0, 1, or 2 |
+| normalized_car_position | float | Position on track 0.0 to 1.0 |
+| world_position_x | float | Car X coordinate |
+| world_position_y | float | Car Y coordinate |
+| world_position_z | float | Car Z coordinate |
+| velocity_x | float | Velocity X component |
+| velocity_y | float | Velocity Y component |
+| velocity_z | float | Velocity Z component |
+| is_in_pit | bool | True if car is in pit lane |
+| is_engine_running | bool | True if engine is on |
+| timestamp_ms | int | Unix timestamp in milliseconds |
+
+---
+
+## Mistake Types
+
+XGBoost classifies each telemetry frame into one of these categories:
+
+| Mistake | Description | Detection Signal |
+|---|---|---|
+| LATE_BRAKE | Braking too late for corner entry | High speed + low brake too close to corner |
+| EARLY_THROTTLE | Applying throttle before apex | Throttle > 0.3 before normalized_position apex |
+| OVERSTEER | Rear losing traction | High steering angle + velocity divergence |
+| UNDERSTEER | Front pushing wide | High throttle + steering not matching trajectory |
+| MISSED_APEX | Too far from ideal line at apex | normalized_car_position deviation at sector midpoint |
+| INCONSISTENT_BRAKING | Variable brake pressure same corner | Standard deviation of brake across same corner entry |
+| CLEAN | No mistake detected | Default class |
+
+---
+
+## Voice Callout Templates
+
+One callout per mistake type. Keep them short — under 8 words. Co-driver tone — calm, precise, actionable.
+
+```python
+CALLOUTS = {
+    "LATE_BRAKE": "Brake now — too much speed",
+    "EARLY_THROTTLE": "Hold — wait for the apex",
+    "OVERSTEER": "Catch it — rear is stepping out",
+    "UNDERSTEER": "Release — you're pushing wide",
+    "MISSED_APEX": "Too wide — tighten your line",
+    "INCONSISTENT_BRAKING": "Commit to your brake point",
+}
+```
+
+---
+
+## Cooldown Rules
+
+Prevents voice spam. Enforced in voice/cooldown.py.
+
+- Same mistake type: 5 second cooldown before repeating
+- Any callout: 2 second minimum between any voice output
+- In pit lane: all callouts suppressed
+- Engine not running: all callouts suppressed
+- Confidence below threshold: callout suppressed
+
+---
+
+## Performance Requirements
+
+These are non-negotiable. Flag immediately if any implementation risks violating them.
+
+| Requirement | Target | Hard Limit |
+|---|---|---|
+| Telemetry read rate | 60hz | Must not drop below 30hz |
+| XGBoost inference time | < 5ms per frame | < 10ms |
+| ElevenLabs voice latency | < 300ms | < 500ms |
+| Main loop blocking | Never | API calls must be threaded |
+| Session CSV write | Every frame | Async write, never block main loop |
+
+The main telemetry loop must never be blocked by API calls, file writes, or model inference. Use threading for everything that could cause delay.
+
+---
+
+## Build Phases
+
+### Phase 1 — Telemetry Bridge
+**Status: NOT STARTED**
+**Goal:** Python reads live AC telemetry at 60hz. Nothing else.
+
+Files to create:
+- `telemetry/models.py` — TelemetryFrame dataclass
+- `telemetry/reader.py` — 60hz continuous loop
+- `main.py` — basic entry point calling reader
+
+Success criteria:
+- Launch AC
+- Run `python main.py`
+- See live telemetry values printing in terminal
+- Find session CSV being written in data/sessions/
+- Script handles AC not running gracefully without crashing
+
+Do not start Phase 2 until these criteria are met and confirmed.
+
+---
+
+### Phase 2 — XGBoost Mistake Predictor
+**Status: NOT STARTED**
+**Goal:** Classify driving mistakes in real time from telemetry stream.
+
+Files to create:
+- `prediction/features.py` — rolling window feature engineering
+- `prediction/labels.py` — threshold-based auto-labeling
+- `prediction/trainer.py` — offline training script
+- `prediction/model.py` — real-time inference
+
+Training data comes from Phase 1 CSV sessions.
+Trainer runs offline — not during a live session.
+Model inference runs in real time — must be < 5ms.
+
+Success criteria:
+- Collect 10+ laps of telemetry from Phase 1
+- Run trainer.py successfully — models/mistake_predictor.pkl created
+- Run a live session — see mistake predictions printing in terminal
+- Inference stays under 5ms per frame
+
+Do not start Phase 3 until these criteria are met and confirmed.
+
+---
+
+### Phase 3 — ElevenLabs Voice Integration
+**Status: NOT STARTED**
+**Goal:** Call out mistakes in real time under 300ms latency.
+
+Files to create:
+- `voice/callouts.py` — callout text templates
+- `voice/cooldown.py` — cooldown logic
+- `voice/coach.py` — ElevenLabs Flash v2.5 integration
+
+ElevenLabs Flash v2.5 is the only acceptable model — standard models are too slow.
+All ElevenLabs calls must happen in a separate thread — never block the main loop.
+
+Success criteria:
+- Drive a session
+- Hear callouts in real time
+- Latency feels under 300ms — responsive not delayed
+- No voice spam — cooldowns working
+- Pit lane suppression working
+
+Do not start Phase 4 until these criteria are met and confirmed.
+
+---
+
+### Phase 4 — Claude Post-Session Debrief
+**Status: NOT STARTED**
+**Goal:** Claude analyzes full session telemetry and generates structured debrief.
+
+Files to create:
+- `debrief/claude_debrief.py` — session analysis via Claude Sonnet
+
+Debrief structure:
+```json
+{
+  "session_summary": {
+    "total_laps": 0,
+    "best_lap_ms": 0,
+    "average_lap_ms": 0,
+    "total_session_time_ms": 0
+  },
+  "performance": {
+    "best_sector": "Sector 1",
+    "worst_sector": "Sector 3",
+    "consistency_score": 0.0,
+    "mistake_frequency": {}
+  },
+  "improvements": [
+    "Improvement 1",
+    "Improvement 2",
+    "Improvement 3"
+  ],
+  "coaching_tip": "One specific tip for next session",
+  "vs_previous_session": "Better/Worse/First session"
+}
+```
+
+Summarize telemetry before sending to Claude — do not send raw CSV rows.
+Request JSON output — parse and display cleanly in terminal.
+
+Success criteria:
+- Finish a session
+- Debrief prints automatically in terminal
+- All JSON fields populated
+- Reads like a real coach reviewed the session
+
+Do not start Phase 5 until these criteria are met and confirmed.
+
+---
+
+### Phase 5 — Integration Polish and Demo Video
+**Status: NOT STARTED**
+**Goal:** Everything works end to end. Demo video recorded.
+
+Tasks:
+- Clean up main.py orchestration
+- Startup sequence — verify AC is running before starting
+- Shutdown sequence — save session, trigger debrief automatically
+- Error handling — graceful recovery from API failures
+- Record 60-second demo video showing real-time callouts
+
+Success criteria:
+- Single command `python main.py` starts everything
+- Drives a session hearing real-time callouts
+- Session ends — debrief prints automatically
+- 60-second demo video recorded and ready to post on LinkedIn
+
+---
+
+## Current Session Instructions
+
+When starting a new Claude Code session:
+
+1. Read this entire CLAUDE.md file first
+2. Read all existing code in the current phase before writing anything
+3. State which phase you are in and what the current task is
+4. Show a plan before writing any code
+5. Wait for approval before implementing
+6. Never modify sim_info.py under any circumstances
+7. Never commit .env, data/, or models/ to GitHub
+8. Flag immediately if anything risks blocking the main telemetry loop
+9. Pin all dependency versions in requirements.txt
+
+---
+
+## Dependencies
+
+Add to requirements.txt with exact pinned versions as each phase is built.
+
+Phase 1:
+```
+pywin32==306
+numpy==1.26.4
+pandas==2.2.2
+python-dotenv==1.0.1
+```
+
+Phase 2:
+```
+xgboost==2.0.3
+scikit-learn==1.4.2
+```
+
+Phase 3:
+```
+elevenlabs==1.3.0
+```
+
+Phase 4:
+```
+anthropic==0.25.8
+```
+
+---
+
+## Critical Rules — Never Violate These
+
+1. Never modify sim_info.py — it is a third-party AC interface file
+2. Never block the main telemetry loop — all API calls must be threaded
+3. Never commit .env to GitHub — API keys must stay local
+4. Never commit data/ or models/ to GitHub — session data stays local
+5. Never start the next phase before current phase success criteria are met
+6. Never assume anything about existing code — always read first
+7. Always pin dependency versions — no version ranges
+8. Always show plan before writing code — wait for approval
+
+---
+
+## Portfolio Context
+
+DriftLine is part of a broader AI engineering portfolio:
+
+**SharpIQ** — Production multi-agent sports analytics SaaS
+- Live at sharpiq.online
+- LangGraph 5-node StateGraph, LangChain RAG, pgvector, Claude API
+- AWS ECS Fargate, Terraform IaC, GitHub Actions CI/CD
+- RAGAS evaluation harness, natural language SQL agent
+- github.com/eyegetlucki/SharpIQ (public overview)
+
+**Foil & Felony** — Cooperative UE5 card shop simulator
+- Unreal Engine 5.7.4, C++, Blueprints
+- Developed using Anthropic official UE5 MCP plugin and Claude Code
+- github.com/eyegetlucki/FoilAndFelony
+
+**Betcha Know!** — Full-stack multiplayer trivia game
+- React, Node.js, Socket.io, Supabase, Stripe
+- Live at betchaknow.vercel.app
+- github.com/eyegetlucki/betchaknow
