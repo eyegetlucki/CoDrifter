@@ -70,15 +70,12 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-; Open the .env.template after install so the user knows to fill in API keys
-Filename: "notepad.exe"; Parameters: "{app}\.env.template"; \
-    Description: "Open API key setup file"; \
-    Flags: postinstall shellexec skipifsilent unchecked
+Filename: "{app}\CoDrifter.exe"; Description: "Launch CoDrifter"; Flags: postinstall nowait skipifsilent
 
 [Messages]
-WelcomeLabel2=This will install [name/ver] on your computer.%n%nCoDrifter is a real-time AI voice co-driver for Assetto Corsa.%n%nAfter installation, copy your API keys into the .env file next to the exe.%n%nClick Next to continue.
+WelcomeLabel2=This will install [name/ver] on your computer.%n%nCoDrifter is a real-time AI voice co-driver for Assetto Corsa.%n%nClick Next to continue.
 FinishedHeadingLabel=CoDrifter is installed.
-FinishedLabel=After closing this window, open .env in the installation folder and paste in your ElevenLabs and Anthropic API keys. Then drop your trained model into the models/ folder and launch the app.%n%nLaunch CoDrifter from your desktop or Start Menu.
+FinishedLabel=Launch CoDrifter and enter your ElevenLabs and Anthropic API keys in the Settings tab.%n%nMake sure Assetto Corsa is running before starting a session.
 
 [UninstallDelete]
 ; Clean up session data on uninstall (optional — comment out to keep data)
