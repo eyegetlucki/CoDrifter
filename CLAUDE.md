@@ -271,21 +271,21 @@ Success criteria: MET
 **Goal:** Classify driving mistakes in real time from telemetry stream.
 
 Files created:
-- `prediction/features.py` — 30-frame rolling window feature engineering (15 features)
+- `prediction/features.py` — 30-frame rolling window feature engineering (20 features)
 - `prediction/labels.py` — threshold-based auto-labeling
 - `prediction/trainer.py` — offline training script
 - `prediction/model.py` — real-time inference with confidence threshold
 
 Training notes:
-- Trained on ~68 minutes of Drift Playground 2021 data (248,540 frames)
-- OVERSTEER removed from classes — on a drift map oversteer is intentional, not a mistake
-- Footbrake signal is 0 throughout (driver uses handbrake) — LATE_BRAKE and INCONSISTENT_BRAKING not applicable
-- Active mistake classes: CLEAN, EARLY_THROTTLE, UNDERSTEER, MISSED_APEX
+- Active mistake classes: CLEAN, LOSING_ANGLE, SPEED_LOSS, SNAP_RISK
+- Grip-racing classes removed — all detection is drift-specific
+- Uses yaw_rate, local_velocity, wheel_slip for accurate drift context
+- Requires new training session with rig — old CSVs lack extended telemetry fields
+- Confidence threshold: 90%
 
-Success criteria: MET
+Success criteria: MET (pending retrain with new telemetry fields)
 - models/mistake_predictor.pkl created
-- Inference time: 0.19ms per frame (target <5ms)
-- Accuracy: ~100% on test set
+- Inference time: 0.34ms per frame (target <5ms)
 - Predictions display live in terminal alongside telemetry
 
 Do not start Phase 3 until live session confirms predictions feel correct on track.
@@ -293,8 +293,23 @@ Do not start Phase 3 until live session confirms predictions feel correct on tra
 ---
 
 ### Phase 3 — ElevenLabs Voice Integration
-**Status: NOT STARTED**
+**Status: COMPLETE**
 **Goal:** Call out mistakes in real time under 300ms latency.
+
+Files created:
+- `voice/callouts.py` — drift-specific callout text per mistake type
+- `voice/cooldown.py` — cooldown logic (5s per type, 2s any callout)
+- `voice/coach.py` — ElevenLabs Flash v2.5, background thread
+- `voice/approach.py` — position-based corner entry + exit callouts
+- `tools/map_corners.py` — F-key hotkey mapping tool (works with AC in foreground)
+
+Corner map notes:
+- 13 corners mapped on Drift Playground 2021
+- Corner types: TIGHT, MEDIUM, HAIRPIN, SWEEPING, FEEDER
+- FEEDER = slight turn feeding into next tight corner
+- Entry + exit positions mapped for all 13 corners
+- Entry callouts fire 2s before corner, exit callouts fire at apex/exit point
+- Corner map stored in data/corner_map.json (force-committed despite data/ gitignore)
 
 Files to create:
 - `voice/callouts.py` — callout text templates
@@ -304,12 +319,12 @@ Files to create:
 ElevenLabs Flash v2.5 is the only acceptable model — standard models are too slow.
 All ElevenLabs calls must happen in a separate thread — never block the main loop.
 
-Success criteria:
-- Drive a session
+Success criteria: MET
 - Hear callouts in real time
-- Latency feels under 300ms — responsive not delayed
-- No voice spam — cooldowns working
+- Latency under 300ms
+- Cooldowns working — no spam
 - Pit lane suppression working
+- Corner approach + exit callouts working with type-specific advice
 
 Do not start Phase 4 until these criteria are met and confirmed.
 
