@@ -106,13 +106,14 @@ class TelemetryWorker(QObject):
             self._coach.check_exit(
                 frame.normalized_car_position, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
+                yaw_rate=frame.yaw_rate,
             )
 
             prediction_type = "CLEAN"
             prediction_conf = 0.0
 
             if self._predictor._model is not None and fv is not None:
-                pred = self._predictor.predict(fv.to_list())
+                pred = self._predictor.predict(fv.to_list(), speed_kmh=frame.speed_kmh)
                 if pred:
                     prediction_type = pred.mistake_type
                     prediction_conf = pred.confidence

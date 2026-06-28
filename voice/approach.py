@@ -17,6 +17,7 @@ MAX_WARNING_OFFSET = 0.075
 
 # How far past the corner entry position to consider "in corner" (normalized units)
 CORNER_ACTIVE_WINDOW = 0.02  # ~16m at track length 783m — entry and apex only
+EXIT_YAW_THRESHOLD = 15.0   # deg/s — suppress exit callout if car isn't drifting
 
 EXIT_CALLOUTS: dict[str, list[str]] = {
     "TIGHT": [
@@ -160,8 +161,10 @@ class CornerApproachDetector:
                     return True
         return False
 
-    def check_exit(self, normalized_pos: float, speed_kmh: float) -> Optional[str]:
+    def check_exit(self, normalized_pos: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
         if not self._loaded or speed_kmh < 10:
+            return None
+        if abs(yaw_rate) < EXIT_YAW_THRESHOLD:
             return None
         for i, corner in enumerate(self._corners):
             exit_pos = corner.get("exit_position")
