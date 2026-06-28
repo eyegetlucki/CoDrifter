@@ -366,6 +366,9 @@ Packaging:
 - `build.bat` — runs PyInstaller then Inno Setup → installer/CoDrifter_Setup.exe
 - `driftline.ico` must be a real ICO (not renamed PNG) — if broken, reconvert via Pillow before building
 - App icon set on both QApplication and MainWindow via absolute path in app.py
+- `build.bat` must have CRLF line endings — LF breaks cmd.exe (.gitattributes enforces this)
+- In frozen exe, `app.py` uses `sys.executable` (not `__file__`) to set working dir — `__file__` resolves inside `_internal/` and breaks all relative data/ paths
+- Session CSVs can be migrated by copying to `Documents\CoDrifter\data\sessions\` after reinstall
 
 UI design decisions:
 - API keys stored in .env only, never in settings.json
