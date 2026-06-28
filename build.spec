@@ -96,7 +96,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,           # add icon.ico here when you have one
+    icon="driftline.ico",
 )
 
 coll = COLLECT(
