@@ -24,15 +24,8 @@ def _h_sep() -> QFrame:
 
 
 def _section_title(text: str) -> QLabel:
-    lbl = QLabel(text.upper())
+    lbl = QLabel(text)
     lbl.setObjectName("section_title")
-    lbl.setStyleSheet(f"""
-        color: {T.TEXT_SECONDARY};
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 2px;
-        padding-bottom: 4px;
-    """)
     return lbl
 
 
@@ -46,7 +39,7 @@ def _card() -> tuple[QFrame, QVBoxLayout]:
         }}
     """)
     layout = QVBoxLayout(frame)
-    layout.setContentsMargins(20, 16, 20, 16)
+    layout.setContentsMargins(22, 18, 22, 18)
     layout.setSpacing(14)
     return frame, layout
 
@@ -105,7 +98,7 @@ class SliderRow(QWidget):
         layout.addWidget(self._slider, 1)
 
         self._val_lbl = QLabel(f"{current}{unit}")
-        self._val_lbl.setFixedWidth(52)
+        self._val_lbl.setFixedWidth(64)
         self._val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._val_lbl.setStyleSheet(f"color: {T.ACCENT}; font-weight: 700; font-size: 13px;")
         self._unit = unit
@@ -174,9 +167,9 @@ class _KeyRow(QWidget):
             self._field.setEchoMode(QLineEdit.EchoMode.Password)
         self._field.setStyleSheet(f"""
             QLineEdit {{
-                background: {T.BG_DEEP};
+                background: {T.BG_INPUT};
                 border: 1px solid {T.BORDER};
-                border-radius: 6px;
+                border-radius: 7px;
                 color: {T.TEXT_PRIMARY};
                 padding: 6px 10px;
                 font-size: 12px;
@@ -237,8 +230,8 @@ class SettingsTab(QWidget):
         outer.setContentsMargins(24, 20, 24, 20)
         outer.setSpacing(0)
 
-        title = QLabel("SETTINGS")
-        title.setStyleSheet(f"color: {T.TEXT_PRIMARY}; font-size: 18px; font-weight: 700; margin-bottom: 16px;")
+        title = QLabel("Settings")
+        title.setStyleSheet(f"color: {T.TEXT_PRIMARY}; font-size: 18px; font-weight: 600; margin-bottom: 16px;")
         outer.addWidget(title)
 
         scroll = QScrollArea()
@@ -516,14 +509,16 @@ class SettingsTab(QWidget):
         if os.path.exists(MODEL_PATH):
             self._model_badge.setText("Found ✓")
             self._model_badge.setStyleSheet(
-                "font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 5px;"
-                f"background: #1a3a1a; color: #4CAF50;"
+                "font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 5px;"
+                f"background: rgba(34,197,94,0.10); color: {T.GREEN};"
+                f"border: 1px solid rgba(34,197,94,0.22);"
             )
         else:
             self._model_badge.setText("Missing")
             self._model_badge.setStyleSheet(
-                "font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 5px;"
-                f"background: #3a1a1a; color: {T.ACCENT};"
+                "font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 5px;"
+                f"background: rgba(255,74,74,0.08); color: {T.ACCENT};"
+                f"border: 1px solid rgba(255,74,74,0.22);"
             )
 
     def _train_model(self):

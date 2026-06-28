@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QFont, QFontDatabase
+from PyQt6.QtGui import QFont, QFontDatabase, QIcon
 from PyQt6.QtCore import Qt
 
 from ui.main_window import MainWindow
@@ -27,6 +27,7 @@ def main():
     app.setFont(font)
 
     window = MainWindow()
+    window.setWindowIcon(QIcon("driftline.ico"))
     window.show()
 
     sys.exit(app.exec())

@@ -63,6 +63,7 @@ class TelemetryWorker(QObject):
         self._extractor = FeatureExtractor()
         self._predictor = self._build_predictor()
         self._coach = self._build_coach()
+        self._coach.load_corner_map(self._settings.get("active_track", ""))
         self._reader = TelemetryReader(session_csv_path=self._session_path)
 
         self.status_changed.emit("connecting")

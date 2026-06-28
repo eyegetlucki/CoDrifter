@@ -1,30 +1,41 @@
-import base64
+import os
+import tempfile
 
 _CHECKMARK_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
   <polyline points="1.5,6.5 4.5,9.5 10.5,2.5" stroke="white" stroke-width="2"
     fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>"""
-_CHECKMARK_URI = "data:image/svg+xml;base64," + base64.b64encode(_CHECKMARK_SVG).decode()
+_tmp = tempfile.NamedTemporaryFile(suffix=".svg", delete=False)
+_tmp.write(_CHECKMARK_SVG)
+_tmp.close()
+_CHECKMARK_PATH = _tmp.name.replace("\\", "/")
 
-BG_DEEP    = "#0C0C0F"
-BG_PANEL   = "#111116"
-BG_CARD    = "#18181F"
-BG_HOVER   = "#1E1E28"
-BORDER     = "#1F1F2E"
-BORDER_LIT = "#2E2E45"
+# ── Palette ───────────────────────────────────────────────────────────────────
+BG_DEEP    = "#0E0E0F"
+BG_PANEL   = "#111113"
+BG_CARD    = "#141417"
+BG_HOVER   = "#1C1C20"
+BG_INPUT   = "#1A1A1E"
+BORDER     = "#222226"
+BORDER_LIT = "#2E2E38"
+TOPBAR_SEP = "#1E1E22"
 
-ACCENT      = "#E63946"
-ACCENT_DARK = "#B82E38"
-ACCENT_GLOW = "#FF4D5A"
-ACCENT_DIM  = "#2A0C10"
+ACCENT      = "#FF4A4A"
+ACCENT_DARK = "#CC3B3B"
+ACCENT_GLOW = "#FF6060"
+ACCENT_DIM  = "#2A0808"
 
-TEXT_PRIMARY   = "#EBEBF5"
-TEXT_SECONDARY = "#6B6B8A"
-TEXT_DIM       = "#30304A"
+TEXT_PRIMARY   = "#E0DDD8"
+TEXT_SECONDARY = "#555562"
+TEXT_DIM       = "#3A3A44"
 
-GREEN  = "#34C77B"
+SPEED_COLOR = "#F0EDE8"
+
+GREEN  = "#22C55E"
 ORANGE = "#E8A020"
-RED    = "#E63946"
+RED    = "#FF4A4A"
+PURPLE = "#A855F7"
+INDIGO = "#6366F1"
 
 FONT_FAMILY = "Segoe UI"
 
@@ -55,9 +66,7 @@ QScrollBar::handle:vertical {{
 QScrollBar::handle:vertical:hover {{
     background: {TEXT_SECONDARY};
 }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-    height: 0;
-}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar:horizontal {{
     background: transparent;
     height: 4px;
@@ -66,9 +75,7 @@ QScrollBar::handle:horizontal {{
     background: {BORDER_LIT};
     border-radius: 2px;
 }}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-    width: 0;
-}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 
 /* ── Buttons ── */
 QPushButton {{
@@ -101,15 +108,11 @@ QPushButton#accent {{
     color: #FFFFFF;
     font-weight: 600;
     font-size: 12px;
-    letter-spacing: 0.5px;
+    padding: 9px 18px;
     border-radius: 8px;
 }}
-QPushButton#accent:hover {{
-    background-color: {ACCENT_GLOW};
-}}
-QPushButton#accent:pressed {{
-    background-color: {ACCENT_DARK};
-}}
+QPushButton#accent:hover {{ background-color: {ACCENT_GLOW}; }}
+QPushButton#accent:pressed {{ background-color: {ACCENT_DARK}; }}
 QPushButton#accent:disabled {{
     background-color: {ACCENT_DIM};
     color: #66334A;
@@ -122,74 +125,49 @@ QPushButton#toggle_on {{
     color: #FFFFFF;
     font-weight: 600;
     font-size: 12px;
-    border-radius: 8px;
+    border-radius: 9px;
     padding: 8px 14px;
 }}
 QPushButton#toggle_off {{
     background-color: {BG_CARD};
     border: 1px solid {BORDER};
     color: {TEXT_SECONDARY};
-    font-weight: 500;
+    font-weight: 400;
     font-size: 12px;
-    border-radius: 8px;
+    border-radius: 9px;
     padding: 8px 14px;
 }}
-QPushButton#toggle_on:hover {{
-    background-color: {ACCENT_GLOW};
-}}
+QPushButton#toggle_on:hover {{ background-color: {ACCENT_GLOW}; }}
 QPushButton#toggle_off:hover {{
-    border-color: {BORDER_LIT};
-    color: {TEXT_PRIMARY};
-}}
-
-/* ── Nav sidebar buttons ── */
-QPushButton#nav {{
-    background-color: transparent;
-    border: none;
-    border-left: 2px solid transparent;
-    border-radius: 0px;
-    color: {TEXT_SECONDARY};
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 1px;
-    text-align: left;
-    padding: 12px 20px 12px 22px;
-}}
-QPushButton#nav:hover {{
     background-color: {BG_HOVER};
     color: {TEXT_PRIMARY};
-}}
-QPushButton#nav[active="true"] {{
-    background-color: {BG_HOVER};
-    color: {TEXT_PRIMARY};
-    border-left: 2px solid {ACCENT};
 }}
 
 /* ── Labels ── */
 QLabel#section_title {{
-    color: {TEXT_SECONDARY};
+    color: {TEXT_DIM};
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 1.5px;
+    letter-spacing: 1px;
 }}
 QLabel#speed_value {{
-    color: {TEXT_PRIMARY};
-    font-size: 80px;
-    font-weight: 700;
+    color: {SPEED_COLOR};
+    font-size: 72px;
+    font-weight: 200;
     font-family: "{FONT_FAMILY}";
-    letter-spacing: -3px;
+    letter-spacing: -4px;
 }}
 QLabel#speed_unit {{
     color: {TEXT_DIM};
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 3px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 2.5px;
 }}
 QLabel#gear_value {{
     color: {ACCENT};
-    font-size: 60px;
-    font-weight: 700;
-    letter-spacing: -2px;
+    font-size: 44px;
+    font-weight: 300;
+    letter-spacing: -1px;
 }}
 QLabel#stat_value {{
     color: {TEXT_PRIMARY};
@@ -213,48 +191,48 @@ QLabel#coaching_tip {{
 
 /* ── Progress bars ── */
 QProgressBar {{
-    background-color: {BG_HOVER};
+    background-color: #1C1C20;
     border: none;
-    border-radius: 4px;
-    height: 6px;
+    border-radius: 2px;
+    height: 3px;
     text-align: center;
     font-size: 0px;
 }}
 QProgressBar::chunk {{
     background-color: {ACCENT};
-    border-radius: 4px;
+    border-radius: 2px;
 }}
 QProgressBar#throttle_bar {{
-    background-color: #0A1A0F;
+    background-color: #1C1C20;
 }}
 QProgressBar#throttle_bar::chunk {{
     background-color: {GREEN};
-    border-radius: 4px;
+    border-radius: 2px;
 }}
 QProgressBar#brake_bar {{
-    background-color: #1A0A0C;
+    background-color: #1C1C20;
 }}
 QProgressBar#brake_bar::chunk {{
     background-color: {RED};
-    border-radius: 4px;
+    border-radius: 2px;
 }}
 
 /* ── Sliders ── */
 QSlider::groove:horizontal {{
-    background: {BG_HOVER};
+    background: #1C1C20;
     height: 3px;
     border-radius: 2px;
 }}
 QSlider::handle:horizontal {{
-    background: {TEXT_SECONDARY};
-    width: 14px;
-    height: 14px;
-    margin: -6px 0;
-    border-radius: 7px;
-    border: 2px solid {BG_DEEP};
+    background: {ACCENT};
+    width: 12px;
+    height: 12px;
+    margin: -5px 0;
+    border-radius: 6px;
+    border: none;
 }}
 QSlider::handle:horizontal:hover {{
-    background: {TEXT_PRIMARY};
+    background: {ACCENT_GLOW};
 }}
 QSlider::sub-page:horizontal {{
     background: {ACCENT};
@@ -272,33 +250,27 @@ QCheckBox::indicator {{
     height: 16px;
     border-radius: 4px;
     border: 1px solid {BORDER_LIT};
-    background: {BG_CARD};
+    background: {BG_INPUT};
 }}
 QCheckBox::indicator:checked {{
     background-color: {ACCENT};
     border-color: {ACCENT};
-    image: url("{_CHECKMARK_URI}");
+    image: url("{_CHECKMARK_PATH}");
 }}
-QCheckBox::indicator:hover {{
-    border-color: {TEXT_SECONDARY};
-}}
+QCheckBox::indicator:hover {{ border-color: {TEXT_SECONDARY}; }}
 
 /* ── Line edits ── */
 QLineEdit {{
-    background-color: {BG_DEEP};
-    border: 1px solid {BORDER_LIT};
+    background-color: {BG_INPUT};
+    border: 1px solid {BORDER};
     border-radius: 7px;
-    padding: 8px 12px;
+    padding: 6px 10px;
     color: {TEXT_PRIMARY};
     selection-background-color: {ACCENT};
-    font-size: 13px;
+    font-size: 12px;
 }}
-QLineEdit:focus {{
-    border-color: {ACCENT};
-}}
-QLineEdit:hover {{
-    border-color: {BORDER_LIT};
-}}
+QLineEdit:focus {{ border-color: {ACCENT}; }}
+QLineEdit:hover {{ border-color: {BORDER_LIT}; }}
 
 /* ── Tables ── */
 QTableWidget {{
@@ -310,7 +282,7 @@ QTableWidget {{
     outline: none;
 }}
 QTableWidget::item {{
-    padding: 13px 16px;
+    padding: 6px 14px;
     border-bottom: 1px solid {BORDER};
     color: {TEXT_PRIMARY};
 }}
@@ -318,16 +290,14 @@ QTableWidget::item:selected {{
     background-color: {ACCENT_DIM};
     color: {TEXT_PRIMARY};
 }}
-QTableWidget::item:hover {{
-    background-color: {BG_HOVER};
-}}
+QTableWidget::item:hover {{ background-color: {BG_HOVER}; }}
 QHeaderView::section {{
     background-color: {BG_CARD};
     color: {TEXT_SECONDARY};
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 1px;
-    padding: 12px 16px;
+    padding: 8px 14px;
     border: none;
     border-bottom: 1px solid {BORDER};
 }}
@@ -350,5 +320,20 @@ QFrame#v_separator {{
 QScrollArea {{
     border: none;
     background-color: transparent;
+}}
+
+/* ── QGroupBox kill ── */
+QGroupBox {{
+    border: none;
+    padding-top: 24px;
+    font-size: 0px;
+}}
+QGroupBox::title {{
+    color: {TEXT_DIM};
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    subcontrol-origin: margin;
+    left: 0px;
 }}
 """

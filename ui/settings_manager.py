@@ -12,6 +12,7 @@ DEFAULTS = {
     "any_callout_cooldown": 2,
     "corner_approach_enabled": True,
     "auto_debrief": True,
+    "active_track": "",
     "mistake_callouts": {
         "LOSING_ANGLE": True,
         "SPEED_LOSS": True,

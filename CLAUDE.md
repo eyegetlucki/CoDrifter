@@ -455,6 +455,27 @@ anthropic==0.25.8
 
 ---
 
+## UI Design System
+
+Window title: "CoDrifter"
+
+Background layers: #0E0E0F (page) → #111113 (sidebar/topbar) → #141417 (cards) → #1A1A1E (inputs/cells)
+Accent: #FF4A4A. Green: #22C55E. Purple: #A855F7. Indigo: #6366F1. Text: #E0DDD8 / #555562 (dim) / #3A3A44 (very dim).
+
+- Sidebar: no right border, 210px wide, sentence case nav labels, active = red dot (#FF4A4A 5px) + bg #1E1A1A, hover bg #1C1C20
+- Topbar: bg #111113, 1px bottom border #1E1E22, 44px height; status dot 6px, status text 11.5px #44444E; active track badge pill right-aligned
+- Cards: bg #141417, border 1px solid #222226, border-radius 12px, no shadows
+- Speed hero: no card border — floats on bg; speed 72px weight 200 letter-spacing -4px color #F0EDE8; "KM / H" 10px letter-spacing 2.5px #3A3A44; gear 44px weight 300 #FF4A4A
+- Input tracks: 3px height bg #1C1C20; throttle #22C55E, brake #FF4A4A, steering #6366F1; value label matches fill color when active, #3A3A44 when zero
+- AI prediction: flat tinted pill QLabel, sentence case text
+- Lap times: 3 cells bg #1A1A1E border-radius 7px; label 9.5px #33333C; value 13px monospace; best #A855F7, current #E0DDD8, last #44444E
+- Section labels: objectName "section_title" → 10px weight 600 letter-spacing 1px color #3A3A44, sentence case
+- Sliders: groove 3px bg #1C1C20, handle #FF4A4A 12px circle
+- Bottom buttons: Coach off/on toggle (border-radius 9px), Stop session red tint rgba(255,74,74,0.04) border rgba(255,74,74,0.3) border-radius 9px
+- Settings: section titles plain QLabel (sentence case), input fields bg #1A1A1E border-radius 7px, model badge rgba green/red pill
+
+---
+
 ## Portfolio Context
 
 DriftLine is part of a broader AI engineering portfolio:

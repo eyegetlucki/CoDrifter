@@ -7,7 +7,8 @@ import json
 import os
 from typing import Optional
 
-CORNER_MAP_PATH = os.path.join("data", "corner_map.json")
+CORNER_MAP_PATH      = os.path.join("data", "corner_map.json")
+TRACK_MAPS_DIR       = os.path.join("data", "track_maps")
 TRACK_LENGTH_M = 783.413
 WARNING_SECONDS = 2.0
 
@@ -105,13 +106,26 @@ class CornerApproachDetector:
         self._exit_triggered: set[int] = set()
         self._loaded = False
 
-    def load(self) -> bool:
-        if not os.path.exists(CORNER_MAP_PATH):
+    def load(self, track_slug: str = "") -> bool:
+        """Load corner map. Tries active track slug first, falls back to legacy path."""
+        path = None
+        if track_slug:
+            candidate = os.path.join(TRACK_MAPS_DIR, f"{track_slug}.json")
+            if os.path.exists(candidate):
+                path = candidate
+        if path is None and os.path.exists(CORNER_MAP_PATH):
+            path = CORNER_MAP_PATH
+
+        if path is None:
             return False
-        with open(CORNER_MAP_PATH) as f:
-            self._corners = json.load(f)
+
+        with open(path) as f:
+            raw = json.load(f)
+
+        # Support both array format and {name, corners} dict format
+        self._corners = raw if isinstance(raw, list) else raw.get("corners", [])
         self._loaded = True
-        print(f"Corner map loaded: {len(self._corners)} corners")
+        print(f"Corner map loaded: {len(self._corners)} corners from {path}")
         return True
 
     def _warning_offset(self, speed_kmh: float) -> float:

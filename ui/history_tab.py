@@ -143,7 +143,7 @@ class HistoryTab(QWidget):
         self._table.setRowCount(len(self._sessions))
 
         for row, s in enumerate(self._sessions):
-            self._table.setRowHeight(row, 72)
+            self._table.setRowHeight(row, 56)
 
             for col, (val, align) in enumerate([
                 (s["date"],     Qt.AlignmentFlag.AlignLeft   | Qt.AlignmentFlag.AlignVCenter),
@@ -160,7 +160,7 @@ class HistoryTab(QWidget):
             # View debrief button
             container = QWidget()
             cl = QHBoxLayout(container)
-            cl.setContentsMargins(10, 4, 10, 4)
+            cl.setContentsMargins(10, 8, 10, 8)
             btn = QPushButton("View Debrief")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(f"""
@@ -171,7 +171,7 @@ class HistoryTab(QWidget):
                     border-radius: 6px;
                     font-size: 12px;
                     font-weight: 500;
-                    padding: 9px 18px;
+                    padding: 6px 16px;
                 }}
                 QPushButton:hover {{
                     background-color: {T.ACCENT_DIM};

@@ -22,7 +22,6 @@ class VoiceCoach:
         self._client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
         self._cooldown = CooldownManager(same_mistake_cooldown, any_callout_cooldown)
         self._approach = CornerApproachDetector()
-        self._approach.load()
         self._queue: queue.Queue = queue.Queue(maxsize=1)
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
@@ -31,6 +30,9 @@ class VoiceCoach:
         self.enabled_mistakes: dict = enabled_mistakes or {
             "LOSING_ANGLE": True, "SPEED_LOSS": True, "SNAP_RISK": True,
         }
+
+    def load_corner_map(self, track_slug: str = ""):
+        self._approach.load(track_slug)
 
     def update_settings(self, same_mistake_cooldown: float, any_callout_cooldown: float,
                         approach_enabled: bool, enabled_mistakes: dict):
