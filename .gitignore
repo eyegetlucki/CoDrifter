@@ -1,3 +1,8 @@
+# DriftLine — never commit session data, trained models, or API keys
+data/
+models/
+.env
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
