@@ -387,6 +387,18 @@ Post-Phase 4 additions:
 - `_clear_right()` in tracks_tab.py recursively purges nested layouts — original only deleted direct widget children, causing button duplication on track re-select
 - `ui/tracks_tab.py` header row split into two rows: name + "Save name" on top, "Set Active" + "Delete track" below
 
+Auto-update system:
+- `version.py` — single source of truth for app version. Update this AND `installer/build.iss` `#define AppVersion` together when releasing (automated by release.py)
+- `ui/updater.py` — `UpdateChecker(QObject)`, checks GitHub Releases API on startup (daemon thread, 8s timeout). Emits `update_available(version, url)` if newer. Downloads installer to `%TEMP%\CoDrifter_update\`. Runs installer silently and quits app.
+- `ui/main_window.py` — amber banner (40px, `#2A1F00`) sits above `self._stack`, visible across all tabs. Hidden until update detected.
+- `release.py` — release automation: `python release.py patch|minor|major [--build]`. Bumps both version files, commits "Release vX.Y.Z", tags, pushes. `--build` also runs build.bat.
+- Release workflow: `python release.py patch` → `build.bat` → GitHub release tagged `vX.Y.Z` → upload `installer\CoDrifter_Setup.exe` as asset.
+
+Accuracy improvements (no retrain required — rule-based):
+- `prediction/model.py`: `HYSTERESIS_FRAMES=4` — same mistake class must appear in 4 consecutive frames (~67ms at 60hz) before `is_mistake=True`. `SPEED_GATE_KMH=25` — returns CLEAN instantly below 25 km/h, clears history.
+- `voice/approach.py`: `EXIT_YAW_THRESHOLD=15` deg/s — `check_exit()` returns None if `abs(yaw_rate) < 15`, suppressing exit callouts when not actually drifting.
+- Deferred (needs more data): per-corner-type warning time multipliers, speed floor per corner type, expanded corner active window.
+
 Do not start Phase 5 until these criteria are met and confirmed.
 
 ---
