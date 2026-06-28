@@ -8,17 +8,23 @@ CLASS_TO_INT = {c: i for i, c in enumerate(MISTAKE_CLASSES)}
 INT_TO_CLASS = {i: c for i, c in enumerate(MISTAKE_CLASSES)}
 
 CORNER_MAP_PATH = os.path.join("data", "corner_map.json")
-CORNER_ACTIVE_WINDOW = 0.02  # normalized position units past corner entry
+CORNER_ACTIVE_WINDOW = 0.02
 
-# Thresholds
-LOSING_ANGLE_THROTTLE = 0.3       # lifting off (throttle below this)
-LOSING_ANGLE_STEERING = 0.3       # while steering is loaded
-LOSING_ANGLE_MIN_SPEED = 20.0     # at meaningful speed
+# LOSING_ANGLE — yaw rate dropping while in corner (car straightening unintentionally)
+LOSING_ANGLE_YAW_DROP = -0.3      # yaw rate delta over window (rad/s per 0.5s)
+LOSING_ANGLE_MIN_YAW = 0.15       # must have been rotating meaningfully
+LOSING_ANGLE_THROTTLE_MAX = 0.5   # not on full throttle (that's intentional lift)
+LOSING_ANGLE_MIN_SPEED = 15.0
 
-SPEED_LOSS_DELTA = -0.5           # km/h per frame (at 60hz = -30 km/h/s)
+# SPEED_LOSS — significant deceleration with rear wheels not slipping (not a power slide)
+SPEED_LOSS_DELTA = -8.0            # km/h over 0.5s window
+SPEED_LOSS_MAX_REAR_SLIP = 5.0    # rear slip low = not a controlled drift deceleration
+SPEED_LOSS_THROTTLE_MAX = 0.35    # not on throttle
 SPEED_LOSS_MIN_SPEED = 20.0
 
-SNAP_RISK_STEERING_STD = 0.2      # erratic steering corrections
+# SNAP_RISK — sudden high yaw rate spike with erratic steering corrections
+SNAP_RISK_YAW_STD = 0.25          # erratic yaw = about to spin
+SNAP_RISK_MIN_LATERAL = 3.0       # actually sideways
 SNAP_RISK_MIN_SPEED = 20.0
 
 
@@ -45,9 +51,13 @@ def _in_corner(pos: float, corner_positions: list[float]) -> bool:
 def label_frame(
     speed: float,
     throttle: float,
-    steering: float,
+    lateral_speed: float,
+    yaw_rate: float,
+    yaw_rate_mean: float,
+    yaw_rate_std: float,
+    yaw_rate_delta: float,
     speed_delta: float,
-    steering_std: float,
+    rear_slip_mean: float,
     normalized_pos: float,
     is_in_pit: bool,
     is_engine_running: bool,
@@ -57,25 +67,27 @@ def label_frame(
         return "CLEAN"
 
     in_corner = _in_corner(normalized_pos, corner_positions)
-    abs_steer = abs(steering)
 
-    # SPEED_LOSS — rapid deceleration while not on throttle
-    if (speed_delta < SPEED_LOSS_DELTA
-            and speed > SPEED_LOSS_MIN_SPEED
-            and throttle < 0.4):
-        return "SPEED_LOSS"
+    # SNAP_RISK — erratic yaw while sideways at speed (anywhere, not just corners)
+    if (yaw_rate_std > SNAP_RISK_YAW_STD
+            and lateral_speed > SNAP_RISK_MIN_LATERAL
+            and speed > SNAP_RISK_MIN_SPEED):
+        return "SNAP_RISK"
 
-    # Corner-only mistakes
     if in_corner:
-        # LOSING_ANGLE — lifting throttle while steering loaded
-        if (throttle < LOSING_ANGLE_THROTTLE
-                and abs_steer > LOSING_ANGLE_STEERING
+        # LOSING_ANGLE — yaw rate decaying, car straightening unintentionally
+        if (yaw_rate_delta < LOSING_ANGLE_YAW_DROP
+                and abs(yaw_rate_mean) > LOSING_ANGLE_MIN_YAW
+                and throttle < LOSING_ANGLE_THROTTLE_MAX
                 and speed > LOSING_ANGLE_MIN_SPEED):
             return "LOSING_ANGLE"
 
-        # SNAP_RISK — erratic steering at speed
-        if steering_std > SNAP_RISK_STEERING_STD and speed > SNAP_RISK_MIN_SPEED:
-            return "SNAP_RISK"
+        # SPEED_LOSS — bleeding speed without rear slip (not a drift, something wrong)
+        if (speed_delta < SPEED_LOSS_DELTA
+                and rear_slip_mean < SPEED_LOSS_MAX_REAR_SLIP
+                and throttle < SPEED_LOSS_THROTTLE_MAX
+                and speed > SPEED_LOSS_MIN_SPEED):
+            return "SPEED_LOSS"
 
     return "CLEAN"
 
@@ -86,9 +98,8 @@ def label_dataframe(df: pd.DataFrame, features_df: pd.DataFrame) -> pd.Series:
     feat_rows = features_df.reset_index(drop=True)
     raw_rows = df.tail(len(features_df)).reset_index(drop=True)
 
-    # Compute per-frame speed delta on the raw df
-    speed_series = raw_rows["speed_kmh"]
-    speed_delta = speed_series.diff().fillna(0)
+    yaw_series = feat_rows["yaw_rate"]
+    yaw_delta = yaw_series.diff().fillna(0)
 
     for i in range(len(feat_rows)):
         fr = feat_rows.iloc[i]
@@ -96,9 +107,13 @@ def label_dataframe(df: pd.DataFrame, features_df: pd.DataFrame) -> pd.Series:
         label = label_frame(
             speed=fr["speed_kmh"],
             throttle=fr["throttle"],
-            steering=fr["abs_steering"],
-            speed_delta=speed_delta.iloc[i],
-            steering_std=fr["steering_std"],
+            lateral_speed=fr["lateral_speed"],
+            yaw_rate=fr["yaw_rate"],
+            yaw_rate_mean=fr["yaw_rate_mean"],
+            yaw_rate_std=fr["yaw_rate_std"],
+            yaw_rate_delta=yaw_delta.iloc[i],
+            speed_delta=fr["speed_delta"],
+            rear_slip_mean=fr["rear_slip_mean"],
             normalized_pos=rr["normalized_car_position"],
             is_in_pit=bool(rr["is_in_pit"]),
             is_engine_running=bool(rr["is_engine_running"]),

@@ -64,6 +64,17 @@ class VoiceCoach:
     def is_in_corner(self, normalized_pos: float) -> bool:
         return self._approach.is_in_corner(normalized_pos)
 
+    def check_exit(self, normalized_pos: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
+        if is_in_pit or not is_engine_running:
+            return
+        text = self._approach.check_exit(normalized_pos, speed_kmh)
+        if text and self._cooldown.is_allowed("EXIT", is_in_pit, is_engine_running):
+            self._cooldown.record("EXIT")
+            try:
+                self._queue.put_nowait(text)
+            except queue.Full:
+                pass
+
     def check_approach(self, normalized_pos: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
         if is_in_pit or not is_engine_running:
             return

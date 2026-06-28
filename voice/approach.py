@@ -17,6 +17,34 @@ MAX_WARNING_OFFSET = 0.075
 # How far past the corner entry position to consider "in corner" (normalized units)
 CORNER_ACTIVE_WINDOW = 0.02  # ~16m at track length 783m — entry and apex only
 
+EXIT_CALLOUTS: dict[str, list[str]] = {
+    "TIGHT": [
+        "Good exit — drive it out",
+        "Clear — open the throttle now",
+        "Corner done — carry the angle",
+    ],
+    "MEDIUM": [
+        "Exit — maintain your angle out",
+        "Clear — smooth throttle out",
+        "Drive it out — hold the drift",
+    ],
+    "HAIRPIN": [
+        "Hairpin exit — unwind and drive",
+        "Clear — straighten and push",
+        "Out of the hairpin — build speed",
+    ],
+    "SWEEPING": [
+        "Sweeper done — carry momentum",
+        "Clear — stay committed through",
+        "Exit — hold your line out",
+    ],
+    "FEEDER": [
+        "Set up now — tight corner coming",
+        "Position yourself — next corner ahead",
+        "Feeder done — prepare your entry",
+    ],
+}
+
 CALLOUTS: dict[str, list[str]] = {
     "TIGHT": [
         "Tight corner — get your angle early",
@@ -51,6 +79,7 @@ CALLOUTS: dict[str, list[str]] = {
 }
 
 _callout_index: dict[int, int] = {}
+_exit_index: dict[int, int] = {}
 
 
 def _get_callout(corner_idx: int, corner_type: str) -> str:
@@ -61,10 +90,19 @@ def _get_callout(corner_idx: int, corner_type: str) -> str:
     return text
 
 
+def _get_exit_callout(corner_idx: int, corner_type: str) -> str:
+    options = EXIT_CALLOUTS.get(corner_type, EXIT_CALLOUTS["MEDIUM"])
+    idx = _exit_index.get(corner_idx, 0)
+    text = options[idx % len(options)]
+    _exit_index[corner_idx] = idx + 1
+    return text
+
+
 class CornerApproachDetector:
     def __init__(self):
         self._corners: list[dict] = []
         self._triggered: set[int] = set()
+        self._exit_triggered: set[int] = set()
         self._loaded = False
 
     def load(self) -> bool:
@@ -94,6 +132,28 @@ class CornerApproachDetector:
                 if normalized_pos >= corner_pos or normalized_pos < end_pos:
                     return True
         return False
+
+    def check_exit(self, normalized_pos: float, speed_kmh: float) -> Optional[str]:
+        if not self._loaded or speed_kmh < 10:
+            return None
+        for i, corner in enumerate(self._corners):
+            exit_pos = corner.get("exit_position")
+            if exit_pos is None:
+                continue
+            corner_type = corner.get("type", "MEDIUM")
+            window_start = exit_pos
+            window_end = (exit_pos + 0.02) % 1.0
+            if window_start < window_end:
+                in_window = window_start <= normalized_pos < window_end
+            else:
+                in_window = normalized_pos >= window_start or normalized_pos < window_end
+            if in_window:
+                if i not in self._exit_triggered:
+                    self._exit_triggered.add(i)
+                    return _get_exit_callout(i, corner_type)
+            else:
+                self._exit_triggered.discard(i)
+        return None
 
     def check(self, normalized_pos: float, speed_kmh: float) -> Optional[str]:
         if not self._loaded or speed_kmh < 10:

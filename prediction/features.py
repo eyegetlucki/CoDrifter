@@ -13,52 +13,51 @@ class FeatureVector:
     throttle: float
     brake: float
     abs_steering: float
+    # True lateral speed from car-relative velocity
     lateral_speed: float
+    forward_speed: float
+    yaw_rate: float
+    abs_yaw_rate: float
+    # Wheel slip
+    rear_slip: float          # avg rear wheel slip
+    rear_slip_delta: float    # change in rear slip
+    # Rolling window stats
     speed_delta: float
-    throttle_delta: float
-    steering_delta: float
     throttle_mean: float
     throttle_std: float
     steering_mean: float
     steering_std: float
-    speed_mean: float
+    yaw_rate_mean: float
+    yaw_rate_std: float
     lateral_speed_mean: float
-    slip_proxy: float  # abs_steering * speed — correlates with oversteer intensity
+    rear_slip_mean: float
+    # Composite
+    slip_angle_proxy: float   # lateral_speed / forward_speed — true sideslip proxy
 
     def to_list(self) -> list:
         return [
-            self.speed_kmh,
-            self.throttle,
-            self.brake,
-            self.abs_steering,
-            self.lateral_speed,
-            self.speed_delta,
-            self.throttle_delta,
-            self.steering_delta,
-            self.throttle_mean,
-            self.throttle_std,
-            self.steering_mean,
-            self.steering_std,
-            self.speed_mean,
-            self.lateral_speed_mean,
-            self.slip_proxy,
+            self.speed_kmh, self.throttle, self.brake, self.abs_steering,
+            self.lateral_speed, self.forward_speed, self.yaw_rate, self.abs_yaw_rate,
+            self.rear_slip, self.rear_slip_delta,
+            self.speed_delta, self.throttle_mean, self.throttle_std,
+            self.steering_mean, self.steering_std,
+            self.yaw_rate_mean, self.yaw_rate_std,
+            self.lateral_speed_mean, self.rear_slip_mean,
+            self.slip_angle_proxy,
         ]
 
     @staticmethod
     def feature_names() -> list:
         return [
             "speed_kmh", "throttle", "brake", "abs_steering",
-            "lateral_speed", "speed_delta", "throttle_delta", "steering_delta",
-            "throttle_mean", "throttle_std", "steering_mean", "steering_std",
-            "speed_mean", "lateral_speed_mean", "slip_proxy",
+            "lateral_speed", "forward_speed", "yaw_rate", "abs_yaw_rate",
+            "rear_slip", "rear_slip_delta",
+            "speed_delta", "throttle_mean", "throttle_std",
+            "steering_mean", "steering_std",
+            "yaw_rate_mean", "yaw_rate_std",
+            "lateral_speed_mean", "rear_slip_mean",
+            "slip_angle_proxy",
         ]
-
-
-def _lateral_speed(vx: float, vz: float, speed_kmh: float) -> float:
-    total = np.sqrt(vx ** 2 + vz ** 2)
-    speed_ms = speed_kmh / 3.6
-    lateral = np.sqrt(max(0.0, total ** 2 - speed_ms ** 2))
-    return float(lateral)
 
 
 class FeatureExtractor:
@@ -67,16 +66,27 @@ class FeatureExtractor:
         self._speeds: deque = deque(maxlen=window)
         self._throttles: deque = deque(maxlen=window)
         self._steerings: deque = deque(maxlen=window)
-        self._laterals: deque = deque(maxlen=window)
+        self._yaw_rates: deque = deque(maxlen=window)
+        self._lateral_speeds: deque = deque(maxlen=window)
+        self._rear_slips: deque = deque(maxlen=window)
 
     def update(self, speed: float, throttle: float, brake: float,
-               steering: float, vx: float, vz: float) -> Optional[FeatureVector]:
-        lat = _lateral_speed(vx, vz, speed)
+               steering: float, vx: float, vz: float,
+               local_vx: float, local_vz: float,
+               yaw_rate: float,
+               wheel_slip_rl: float, wheel_slip_rr: float) -> Optional[FeatureVector]:
+
+        lateral_speed = abs(local_vx)
+        forward_speed = abs(local_vz)
+        rear_slip = (abs(wheel_slip_rl) + abs(wheel_slip_rr)) / 2.0
+        slip_angle_proxy = lateral_speed / max(forward_speed, 0.1)
 
         self._speeds.append(speed)
         self._throttles.append(throttle)
         self._steerings.append(abs(steering))
-        self._laterals.append(lat)
+        self._yaw_rates.append(yaw_rate)
+        self._lateral_speeds.append(lateral_speed)
+        self._rear_slips.append(rear_slip)
 
         if len(self._speeds) < 2:
             return None
@@ -84,31 +94,40 @@ class FeatureExtractor:
         speeds = list(self._speeds)
         throttles = list(self._throttles)
         steerings = list(self._steerings)
-        laterals = list(self._laterals)
+        yaw_rates = list(self._yaw_rates)
+        laterals = list(self._lateral_speeds)
+        slips = list(self._rear_slips)
 
         return FeatureVector(
             speed_kmh=speed,
             throttle=throttle,
             brake=brake,
             abs_steering=abs(steering),
-            lateral_speed=lat,
+            lateral_speed=lateral_speed,
+            forward_speed=forward_speed,
+            yaw_rate=yaw_rate,
+            abs_yaw_rate=abs(yaw_rate),
+            rear_slip=rear_slip,
+            rear_slip_delta=slips[-1] - slips[0],
             speed_delta=speeds[-1] - speeds[0],
-            throttle_delta=throttles[-1] - throttles[0],
-            steering_delta=steerings[-1] - steerings[0],
             throttle_mean=float(np.mean(throttles)),
             throttle_std=float(np.std(throttles)),
             steering_mean=float(np.mean(steerings)),
             steering_std=float(np.std(steerings)),
-            speed_mean=float(np.mean(speeds)),
+            yaw_rate_mean=float(np.mean(yaw_rates)),
+            yaw_rate_std=float(np.std(yaw_rates)),
             lateral_speed_mean=float(np.mean(laterals)),
-            slip_proxy=abs(steering) * speed,
+            rear_slip_mean=float(np.mean(slips)),
+            slip_angle_proxy=slip_angle_proxy,
         )
 
     def reset(self):
         self._speeds.clear()
         self._throttles.clear()
         self._steerings.clear()
-        self._laterals.clear()
+        self._yaw_rates.clear()
+        self._lateral_speeds.clear()
+        self._rear_slips.clear()
 
 
 def extract_features_from_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -122,6 +141,11 @@ def extract_features_from_df(df: pd.DataFrame) -> pd.DataFrame:
             steering=row["steering_angle"],
             vx=row["velocity_x"],
             vz=row["velocity_z"],
+            local_vx=row.get("local_velocity_x", 0.0),
+            local_vz=row.get("local_velocity_z", 0.0),
+            yaw_rate=row.get("yaw_rate", 0.0),
+            wheel_slip_rl=row.get("wheel_slip_rl", 0.0),
+            wheel_slip_rr=row.get("wheel_slip_rr", 0.0),
         )
         if fv is not None:
             rows.append(fv.to_list())

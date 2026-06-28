@@ -22,6 +22,11 @@ CSV_COLUMNS = [
     "world_position_x", "world_position_y", "world_position_z",
     "velocity_x", "velocity_y", "velocity_z",
     "is_in_pit", "is_engine_running",
+    "local_velocity_x", "local_velocity_y", "local_velocity_z",
+    "yaw_rate", "heading",
+    "wheel_slip_fl", "wheel_slip_fr", "wheel_slip_rl", "wheel_slip_rr",
+    "tyre_temp_fl", "tyre_temp_fr", "tyre_temp_rl", "tyre_temp_rr",
+    "tc_active", "abs_active",
 ]
 
 
@@ -68,6 +73,21 @@ class TelemetryReader:
             "velocity_z": round(frame.velocity_z, 4),
             "is_in_pit": frame.is_in_pit,
             "is_engine_running": frame.is_engine_running,
+            "local_velocity_x": round(frame.local_velocity_x, 4),
+            "local_velocity_y": round(frame.local_velocity_y, 4),
+            "local_velocity_z": round(frame.local_velocity_z, 4),
+            "yaw_rate": round(frame.yaw_rate, 4),
+            "heading": round(frame.heading, 4),
+            "wheel_slip_fl": round(frame.wheel_slip_fl, 4),
+            "wheel_slip_fr": round(frame.wheel_slip_fr, 4),
+            "wheel_slip_rl": round(frame.wheel_slip_rl, 4),
+            "wheel_slip_rr": round(frame.wheel_slip_rr, 4),
+            "tyre_temp_fl": round(frame.tyre_temp_fl, 2),
+            "tyre_temp_fr": round(frame.tyre_temp_fr, 2),
+            "tyre_temp_rl": round(frame.tyre_temp_rl, 2),
+            "tyre_temp_rr": round(frame.tyre_temp_rr, 2),
+            "tc_active": round(frame.tc_active, 4),
+            "abs_active": round(frame.abs_active, 4),
         }
 
     def _read_frame(self) -> TelemetryFrame:
@@ -94,6 +114,21 @@ class TelemetryReader:
             is_in_pit=bool(g.isInPit or g.isInPitLane),
             is_engine_running=bool(p.rpms > 0),
             timestamp_ms=int(time.time() * 1000),
+            local_velocity_x=p.localVelocity[0],
+            local_velocity_y=p.localVelocity[1],
+            local_velocity_z=p.localVelocity[2],
+            yaw_rate=p.localAngularVel[1],
+            heading=p.heading,
+            wheel_slip_fl=p.wheelSlip[0],
+            wheel_slip_fr=p.wheelSlip[1],
+            wheel_slip_rl=p.wheelSlip[2],
+            wheel_slip_rr=p.wheelSlip[3],
+            tyre_temp_fl=p.tyreCoreTemperature[0],
+            tyre_temp_fr=p.tyreCoreTemperature[1],
+            tyre_temp_rl=p.tyreCoreTemperature[2],
+            tyre_temp_rr=p.tyreCoreTemperature[3],
+            tc_active=p.tc,
+            abs_active=p.abs,
         )
 
     def connect(self):

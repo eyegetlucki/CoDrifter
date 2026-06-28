@@ -1,17 +1,13 @@
 """
-Corner mapping tool for Drift Playground 2021.
-Uses global hotkeys that work even when AC is in the foreground.
+Corner exit mapping tool — partial re-run starting from a specific corner.
 
 Controls (work anywhere, even with AC focused):
-  F7  — TIGHT    (sharp, short corner)
-  F8  — MEDIUM   (wider, hold the angle a bit longer)
-  F9  — HAIRPIN  (very sharp, near 180 degrees)
-  F10 — SWEEPING (long gradual curve, maintain angle)
-  F11 — FEEDER   (slight turn that feeds into the next tight corner)
-  F12 — Undo last mark
-  F6  — Finish and save
+  F7  — mark corner EXIT
+  F8  — undo last mark
+  F6  — finish and save
 
-Usage: python -m tools.map_corners
+Usage: python -m tools.map_corners [start_corner]
+Example: python -m tools.map_corners 7   (re-map exits from corner 7 onwards)
 """
 import os
 import json
@@ -23,27 +19,27 @@ from telemetry.sim_info import SimInfo
 
 OUTPUT_PATH = os.path.join("data", "corner_map.json")
 
-corners = []
-corner_num = 1
+exits = []
+exit_index = 0
 done = False
 
 
-def mark(sim, corner_type: str):
-    global corner_num
+def mark_exit(sim, start_corner):
+    global exit_index
     pos = round(sim.graphics.normalizedCarPosition, 4)
     speed = sim.physics.speedKmh
-    entry = {"corner": corner_num, "position": pos, "type": corner_type}
-    corners.append(entry)
-    print(f"\n  Corner {corner_num} [{corner_type}] marked at position {pos}  (speed: {speed:.1f} km/h)")
-    corner_num += 1
+    corner_num = start_corner + exit_index
+    exits.append(pos)
+    exit_index += 1
+    print(f"\n  Exit for Corner {corner_num} marked at position {pos}  (speed: {speed:.1f} km/h)")
 
 
 def undo():
-    global corner_num
-    if corners:
-        removed = corners.pop()
-        corner_num -= 1
-        print(f"\n  Removed Corner {removed['corner']} [{removed['type']}] at position {removed['position']}")
+    global exit_index
+    if exits:
+        exits.pop()
+        exit_index -= 1
+        print(f"\n  Undone — {exit_index} exits marked")
     else:
         print("\n  Nothing to undo")
 
@@ -56,50 +52,57 @@ def finish():
 def main():
     global done
 
+    start_corner = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+
+    if not os.path.exists(OUTPUT_PATH):
+        print(f"ERROR: {OUTPUT_PATH} not found.")
+        return
+
+    with open(OUTPUT_PATH) as f:
+        existing = json.load(f)
+
+    corners_to_map = [c for c in existing if c["corner"] >= start_corner]
+    print(f"Will map exits for corners {start_corner} to {existing[-1]['corner']}:")
+    for c in corners_to_map:
+        print(f"  Corner {c['corner']} [{c['type']}] entry at {c['position']}")
+    print()
+
     sim = SimInfo()
     print("Connecting to AC...")
     while not sim.connect():
         print("  AC not running — retrying in 2 seconds...")
         time.sleep(2)
     print("Connected.\n")
-    print("Drive a slow lap and classify each corner:")
-    print("  F7  — TIGHT    (sharp, short corner)")
-    print("  F8  — MEDIUM   (wider, hold the angle a bit longer)")
-    print("  F9  — HAIRPIN  (very sharp, near 180 degrees)")
-    print("  F10 — SWEEPING (long gradual curve, maintain angle)")
-    print("  F11 — FEEDER   (slight turn feeding into the next tight corner)")
-    print("  F12 — Undo last mark")
-    print("  F6  — Finish and save\n")
+    print("  F7 — mark EXIT (press as you pass each corner apex/exit)")
+    print("  F8 — undo last mark")
+    print("  F6 — finish and save\n")
 
-    keyboard.add_hotkey("F7", mark, args=(sim, "TIGHT"))
-    keyboard.add_hotkey("F8", mark, args=(sim, "MEDIUM"))
-    keyboard.add_hotkey("F9", mark, args=(sim, "HAIRPIN"))
-    keyboard.add_hotkey("F10", mark, args=(sim, "SWEEPING"))
-    keyboard.add_hotkey("F11", mark, args=(sim, "FEEDER"))
-    keyboard.add_hotkey("F12", undo)
+    keyboard.add_hotkey("F7", mark_exit, args=(sim, start_corner))
+    keyboard.add_hotkey("F8", undo)
     keyboard.add_hotkey("F6", finish)
 
     while not done:
         pos = sim.graphics.normalizedCarPosition
         speed = sim.physics.speedKmh
-        sys.stdout.write(f"\r  Position: {pos:.4f}  Speed: {speed:.1f} km/h  Corners marked: {len(corners)}   ")
+        sys.stdout.write(f"\r  Position: {pos:.4f}  Speed: {speed:.1f} km/h  Exits marked: {exit_index}/{len(corners_to_map)}   ")
         sys.stdout.flush()
         time.sleep(1 / 30)
 
     keyboard.unhook_all()
 
-    # Drop last entry if it wraps back to near start
-    if len(corners) > 1 and corners[-1]["position"] < corners[0]["position"] + 0.05:
-        corners.pop()
+    # Merge back into existing
+    for i, corner in enumerate(existing):
+        if corner["corner"] >= start_corner:
+            idx = corner["corner"] - start_corner
+            if idx < len(exits):
+                corner["exit_position"] = exits[idx]
 
-    os.makedirs("data", exist_ok=True)
     with open(OUTPUT_PATH, "w") as f:
-        json.dump(corners, f, indent=2)
+        json.dump(existing, f, indent=2)
 
-    print(f"\n\nSaved {len(corners)} corners to {os.path.abspath(OUTPUT_PATH)}")
-    print("\nCorner map:")
-    for c in corners:
-        print(f"  Corner {c['corner']} [{c['type']}]: position {c['position']}")
+    print(f"\n\nSaved. Updated corner map:")
+    for c in existing:
+        print(f"  Corner {c['corner']} [{c['type']}]: entry {c['position']} -> exit {c.get('exit_position', 'N/A')}")
 
     sim.close()
 

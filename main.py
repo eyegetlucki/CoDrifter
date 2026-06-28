@@ -48,9 +48,15 @@ def main():
             steering=frame.steering_angle,
             vx=frame.velocity_x,
             vz=frame.velocity_z,
+            local_vx=frame.local_velocity_x,
+            local_vz=frame.local_velocity_z,
+            yaw_rate=frame.yaw_rate,
+            wheel_slip_rl=frame.wheel_slip_rl,
+            wheel_slip_rr=frame.wheel_slip_rr,
         )
 
         coach.check_approach(frame.normalized_car_position, frame.speed_kmh, frame.is_in_pit, frame.is_engine_running)
+        coach.check_exit(frame.normalized_car_position, frame.speed_kmh, frame.is_in_pit, frame.is_engine_running)
 
         if model_available and fv is not None:
             pred = predictor.predict(fv.to_list())
