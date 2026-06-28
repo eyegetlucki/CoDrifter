@@ -35,9 +35,6 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 WizardSizePercent=110
-; Window appearance
-WizardImageFile=compiler:WizModernImage-IS.bmp
-WizardSmallImageFile=compiler:WizModernSmallImage-IS.bmp
 ; Minimum OS: Windows 10
 MinVersion=10.0
 ArchitecturesAllowed=x64
