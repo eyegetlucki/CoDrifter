@@ -57,6 +57,12 @@ def train():
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
+    # Upweight minority classes to counter 98%+ CLEAN dominance
+    # Moderate upweighting — full inverse weighting caused too many false positives
+    class_counts = np.bincount(y_train)
+    max_count = class_counts.max()
+    sample_weights = np.array([np.sqrt(max_count / class_counts[label]) for label in y_train])
+
     print(f"\nTraining XGBoost on {len(X_train)} samples...")
     model = XGBClassifier(
         n_estimators=100,
@@ -70,7 +76,7 @@ def train():
         random_state=42,
         objective="multi:softprob",
     )
-    model.fit(X_train, y_train)
+    model.fit(X_train, y_train, sample_weight=sample_weights)
 
     print("\nEvaluating on test set...")
     y_pred = model.predict(X_test)

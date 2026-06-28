@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from prediction.labels import INT_TO_CLASS
 
 MODEL_PATH = os.path.join("models", "mistake_predictor.pkl")
-CONFIDENCE_THRESHOLD = 0.6
+CONFIDENCE_THRESHOLD = 0.9
 
 
 @dataclass

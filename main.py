@@ -9,6 +9,7 @@ from telemetry.reader import TelemetryReader
 from telemetry.models import TelemetryFrame
 from prediction.features import FeatureExtractor
 from prediction.model import MistakePredictor
+from voice.coach import VoiceCoach
 
 SESSIONS_DIR = os.path.join("data", "sessions")
 PRINT_EVERY_N_FRAMES = 30  # ~2hz display update
@@ -24,6 +25,7 @@ def main():
     session_path = _make_session_path()
     reader = TelemetryReader(session_csv_path=session_path)
     extractor = FeatureExtractor()
+    coach = VoiceCoach()
 
     predictor = MistakePredictor()
     model_available = False
@@ -35,11 +37,9 @@ def main():
         print("To train: python -m prediction.trainer\n")
 
     last_prediction = "CLEAN"
-    frame_count = 0
 
     def _on_frame(frame: TelemetryFrame, count: int):
-        nonlocal last_prediction, frame_count
-        frame_count = count
+        nonlocal last_prediction
 
         fv = extractor.update(
             speed=frame.speed_kmh,
@@ -50,10 +50,13 @@ def main():
             vz=frame.velocity_z,
         )
 
+        coach.check_approach(frame.normalized_car_position, frame.speed_kmh, frame.is_in_pit, frame.is_engine_running)
+
         if model_available and fv is not None:
             pred = predictor.predict(fv.to_list())
             if pred and pred.is_mistake:
                 last_prediction = f"{pred.mistake_type} ({pred.confidence:.0%})"
+                coach.call_out(pred.mistake_type, frame.is_in_pit, frame.is_engine_running)
             elif pred and pred.mistake_type == "CLEAN":
                 last_prediction = "CLEAN"
 
@@ -73,6 +76,7 @@ def main():
 
     def _shutdown(sig, frame):
         print("\n\nShutting down...")
+        coach.stop()
         reader.stop()
 
     signal.signal(signal.SIGINT, _shutdown)

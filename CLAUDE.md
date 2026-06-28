@@ -208,13 +208,14 @@ One callout per mistake type. Keep them short — under 8 words. Co-driver tone 
 
 ```python
 CALLOUTS = {
-    "EARLY_THROTTLE": "Hold — wait for the apex",
-    "UNDERSTEER": "Release — you're pushing wide",
+    "EARLY_THROTTLE": "Wait — let it rotate first",
+    "UNDERSTEER": "More angle — kick the rear out",
     "MISSED_APEX": "Too wide — tighten your line",
 }
 ```
 
 Note: OVERSTEER, LATE_BRAKE, and INCONSISTENT_BRAKING removed — not applicable for drift driving on Drift Playground 2021. If adding circuit/grip support in future, add them back.
+UNDERSTEER in drift context = car not rotating enough, plowing straight instead of getting sideways.
 
 ---
 
