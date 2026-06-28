@@ -331,45 +331,47 @@ Do not start Phase 4 until these criteria are met and confirmed.
 ---
 
 ### Phase 4 — Claude Post-Session Debrief
-**Status: NOT STARTED**
+**Status: COMPLETE**
 **Goal:** Claude analyzes full session telemetry and generates structured debrief.
 
-Files to create:
-- `debrief/claude_debrief.py` — session analysis via Claude Sonnet
+Files created:
+- `debrief/claude_debrief.py` — session analysis via claude-sonnet-4-6, returns dict for UI
 
-Debrief structure:
-```json
-{
-  "session_summary": {
-    "total_laps": 0,
-    "best_lap_ms": 0,
-    "average_lap_ms": 0,
-    "total_session_time_ms": 0
-  },
-  "performance": {
-    "best_sector": "Sector 1",
-    "worst_sector": "Sector 3",
-    "consistency_score": 0.0,
-    "mistake_frequency": {}
-  },
-  "improvements": [
-    "Improvement 1",
-    "Improvement 2",
-    "Improvement 3"
-  ],
-  "coaching_tip": "One specific tip for next session",
-  "vs_previous_session": "Better/Worse/First session"
-}
-```
+Model: claude-sonnet-4-6 (NOT opus — per CLAUDE.md)
+Telemetry is summarized before sending — raw CSV rows never sent to Claude.
+Returns parsed dict; auto-triggered after session ends if auto_debrief setting is True.
 
-Summarize telemetry before sending to Claude — do not send raw CSV rows.
-Request JSON output — parse and display cleanly in terminal.
+---
 
-Success criteria:
-- Finish a session
-- Debrief prints automatically in terminal
-- All JSON fields populated
-- Reads like a real coach reviewed the session
+### UI / Desktop App — COMPLETE
+**Goal:** PyQt6 desktop app wrapping all phases with clean inviting UI.
+
+Entry point: `app.py` (sets working dir, loads .env, launches MainWindow)
+
+Files created:
+- `ui/__init__.py`
+- `ui/theme.py` — color constants + full QSS stylesheet. Dark warm neutrals, accent #E63946.
+- `ui/settings_manager.py` — JSON settings at data/settings.json, auto-saves on every change.
+  - reset_to_defaults() never touches .env/API keys
+- `ui/telemetry_worker.py` — QObject on QThread, emits signals at ~10hz
+- `ui/dashboard_tab.py` — 2-column layout: Speed hero | Inputs left + Prediction+Laps right
+- `ui/history_tab.py` — session CSV browser, "View Debrief" per row
+- `ui/debrief_tab.py` — renders Claude debrief dict as cards
+- `ui/settings_tab.py` — API Keys card (writes to .env), Model card (status + train), voice/timing/AI/session settings, Restore Defaults button
+- `ui/main_window.py` — sidebar nav, QStackedWidget pages, session lifecycle
+
+Packaging:
+- `build.spec` — PyInstaller spec (onedir, console=False)
+- `installer/build.iss` — Inno Setup 6, installs to My Documents (no UAC), desktop shortcut checkbox
+- `build.bat` — runs PyInstaller then Inno Setup → installer/DriftLine_Setup.exe
+- `env.template` — API key template shown to user post-install
+
+UI design decisions:
+- API keys stored in .env only, never in settings.json
+- Model always loads from models/mistake_predictor.pkl — no manual selection
+- Train Model button runs trainer.py in background thread, badge updates on completion
+- Checkmark SVG embedded as base64 in QSS — no external image files needed
+- All text sentence case (not ALL CAPS) — cleaner, less aggressive
 
 Do not start Phase 5 until these criteria are met and confirmed.
 

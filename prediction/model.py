@@ -11,14 +11,19 @@ CONFIDENCE_THRESHOLD = 0.9
 
 @dataclass
 class MistakePrediction:
+
     mistake_type: str
     confidence: float
     is_mistake: bool
 
 
 class MistakePredictor:
-    def __init__(self):
+    def __init__(self, confidence_threshold: float = CONFIDENCE_THRESHOLD):
         self._model = None
+        self._threshold = confidence_threshold
+
+    def set_threshold(self, value: float):
+        self._threshold = value
 
     def load(self):
         if not os.path.exists(MODEL_PATH):
@@ -41,5 +46,5 @@ class MistakePredictor:
         return MistakePrediction(
             mistake_type=mistake_type,
             confidence=confidence,
-            is_mistake=mistake_type != "CLEAN" and confidence >= CONFIDENCE_THRESHOLD,
+            is_mistake=mistake_type != "CLEAN" and confidence >= self._threshold,
         )

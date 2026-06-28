@@ -16,14 +16,27 @@ MODEL_ID = "eleven_flash_v2_5"
 
 
 class VoiceCoach:
-    def __init__(self):
+    def __init__(self, enabled: bool = False, same_mistake_cooldown: float = 5.0,
+                 any_callout_cooldown: float = 2.0, approach_enabled: bool = True,
+                 enabled_mistakes: dict | None = None):
         self._client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
-        self._cooldown = CooldownManager()
+        self._cooldown = CooldownManager(same_mistake_cooldown, any_callout_cooldown)
         self._approach = CornerApproachDetector()
         self._approach.load()
         self._queue: queue.Queue = queue.Queue(maxsize=1)
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
+        self.enabled: bool = enabled
+        self.approach_enabled: bool = approach_enabled
+        self.enabled_mistakes: dict = enabled_mistakes or {
+            "LOSING_ANGLE": True, "SPEED_LOSS": True, "SNAP_RISK": True,
+        }
+
+    def update_settings(self, same_mistake_cooldown: float, any_callout_cooldown: float,
+                        approach_enabled: bool, enabled_mistakes: dict):
+        self._cooldown.update_cooldowns(same_mistake_cooldown, any_callout_cooldown)
+        self.approach_enabled = approach_enabled
+        self.enabled_mistakes = enabled_mistakes
 
     def _speak(self, text: str):
         audio = self._client.text_to_speech.convert(
@@ -47,6 +60,10 @@ class VoiceCoach:
                 self._queue.task_done()
 
     def call_out(self, mistake_type: str, is_in_pit: bool, is_engine_running: bool):
+        if not self.enabled:
+            return
+        if not self.enabled_mistakes.get(mistake_type, True):
+            return
         if not self._cooldown.is_allowed(mistake_type, is_in_pit, is_engine_running):
             return
 
@@ -65,6 +82,8 @@ class VoiceCoach:
         return self._approach.is_in_corner(normalized_pos)
 
     def check_exit(self, normalized_pos: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
+        if not self.enabled or not self.approach_enabled:
+            return
         if is_in_pit or not is_engine_running:
             return
         text = self._approach.check_exit(normalized_pos, speed_kmh)
@@ -76,6 +95,8 @@ class VoiceCoach:
                 pass
 
     def check_approach(self, normalized_pos: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
+        if not self.enabled or not self.approach_enabled:
+            return
         if is_in_pit or not is_engine_running:
             return
         text = self._approach.check(normalized_pos, speed_kmh)

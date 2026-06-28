@@ -10,6 +10,7 @@ from telemetry.models import TelemetryFrame
 from prediction.features import FeatureExtractor
 from prediction.model import MistakePredictor
 from voice.coach import VoiceCoach
+from debrief.claude_debrief import run_debrief
 
 SESSIONS_DIR = os.path.join("data", "sessions")
 PRINT_EVERY_N_FRAMES = 30  # ~2hz display update
@@ -97,6 +98,7 @@ def main():
     reader.run(on_frame=_on_frame)
 
     print(f"\nSession saved to: {os.path.abspath(session_path)}")
+    run_debrief(session_path)
 
 
 if __name__ == "__main__":

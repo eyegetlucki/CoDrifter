@@ -5,9 +5,16 @@ ANY_CALLOUT_COOLDOWN = 2.0    # minimum gap between any two callouts
 
 
 class CooldownManager:
-    def __init__(self):
+    def __init__(self, same_mistake_cooldown: float = SAME_MISTAKE_COOLDOWN,
+                 any_callout_cooldown: float = ANY_CALLOUT_COOLDOWN):
+        self._same = same_mistake_cooldown
+        self._any = any_callout_cooldown
         self._last_callout_time: float = 0.0
         self._last_per_type: dict[str, float] = {}
+
+    def update_cooldowns(self, same_mistake: float, any_callout: float):
+        self._same = same_mistake
+        self._any = any_callout
 
     def is_allowed(self, mistake_type: str, is_in_pit: bool, is_engine_running: bool) -> bool:
         if is_in_pit or not is_engine_running:
@@ -15,11 +22,11 @@ class CooldownManager:
 
         now = time.monotonic()
 
-        if now - self._last_callout_time < ANY_CALLOUT_COOLDOWN:
+        if now - self._last_callout_time < self._any:
             return False
 
         last_for_type = self._last_per_type.get(mistake_type, 0.0)
-        if now - last_for_type < SAME_MISTAKE_COOLDOWN:
+        if now - last_for_type < self._same:
             return False
 
         return True
