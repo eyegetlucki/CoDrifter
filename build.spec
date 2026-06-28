@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for DriftLine
+# PyInstaller spec for CoDrifter
 # Run: pyinstaller build.spec
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -85,7 +85,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="DriftLine",
+    name="CoDrifter",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -107,5 +107,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="DriftLine",    # output: dist/DriftLine/
+    name="CoDrifter",    # output: dist/CoDrifter/
 )

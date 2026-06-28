@@ -17,8 +17,8 @@ from ui.theme import STYLESHEET
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("DriftLine")
-    app.setOrganizationName("DriftLine")
+    app.setApplicationName("CoDrifter")
+    app.setOrganizationName("CoDrifter")
 
     app.setStyleSheet(STYLESHEET)
 

@@ -3,7 +3,7 @@ setlocal
 
 echo.
 echo =============================================
-echo   DriftLine Build Script
+echo   CoDrifter Build Script
 echo =============================================
 echo.
 
@@ -19,7 +19,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo PyInstaller complete. Output: dist\DriftLine\DriftLine.exe
+echo PyInstaller complete. Output: dist\CoDrifter\CoDrifter.exe
 echo.
 
 :: Step 2 — Inno Setup
@@ -43,7 +43,7 @@ if "%ISCC%"=="" (
     echo       Install Inno Setup 7 from: https://jrsoftware.org/isdl.php
     echo       Then run manually: iscc installer\build.iss
     echo.
-    echo PyInstaller output is ready at: dist\DriftLine\
+    echo PyInstaller output is ready at: dist\CoDrifter\
     pause
     exit /b 0
 )
@@ -61,7 +61,7 @@ if errorlevel 1 (
 echo.
 echo =============================================
 echo   BUILD COMPLETE
-echo   Installer: installer\DriftLine_Setup.exe
+echo   Installer: installer\CoDrifter_Setup.exe
 echo =============================================
 echo.
 pause

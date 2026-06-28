@@ -1,26 +1,26 @@
-# DriftLine — AI Voice Co-Driver for Assetto Corsa
+# CoDrifter — AI Voice Co-Driver for Assetto Corsa
 
 ## Read This First
 
-This is the master project document for DriftLine. Read this entire file before touching any code, any file, or any configuration. Every Claude Code session starts here.
+This is the master project document for CoDrifter. Read this entire file before touching any code, any file, or any configuration. Every Claude Code session starts here.
 
 ---
 
 ## Project Overview
 
-DriftLine is a real-time AI voice co-driver for Assetto Corsa. It reads live telemetry from the game via shared memory, predicts driving mistakes before they become lap time, calls them out via ElevenLabs voice in under 300ms, and generates a full Claude-powered debrief after every session.
+CoDrifter is a real-time AI voice co-driver for Assetto Corsa. It reads live telemetry from the game via shared memory, predicts driving mistakes before they become lap time, calls them out via ElevenLabs voice in under 300ms, and generates a full Claude-powered debrief after every session.
 
 This is a local Windows application — it runs alongside Assetto Corsa on the same machine. It is not a web app, not a server, and not deployed to the cloud. All real-time processing happens locally. Only the ElevenLabs and Anthropic API calls go over the network.
 
 **Developer:** Laitrell Uy-Xayachak
 **Contact:** laitrell.company@gmail.com
-**GitHub:** github.com/eyegetlucki/DriftLine
+**GitHub:** github.com/eyegetlucki/CoDrifter
 
 ---
 
 ## The Vision
 
-A driver launches Assetto Corsa, starts a session, and runs `python main.py` in a terminal. DriftLine connects to the game via shared memory and starts reading telemetry at 60hz.
+A driver launches Assetto Corsa, starts a session, and runs `python main.py` in a terminal. CoDrifter connects to the game via shared memory and starts reading telemetry at 60hz.
 
 As the driver approaches Turn 3 carrying too much speed, the co-driver says:
 > "Brake now — you're carrying too much speed into Turn 3."
@@ -88,14 +88,14 @@ Printed to terminal
 | AI Debrief | Claude Sonnet via Anthropic API | Post-session only, not real-time |
 | Data Storage | CSV per session, local | Stored in data/sessions/ |
 | IDE | VS Code or Cursor | Windows only — shared memory is Windows-specific |
-| Version Control | GitHub | github.com/eyegetlucki/DriftLine |
+| Version Control | GitHub | github.com/eyegetlucki/CoDrifter |
 
 ---
 
 ## Project Structure
 
 ```
-DriftLine/
+CoDrifter/
 |
 ├── CLAUDE.md                       # This file — read before every session
 ├── main.py                         # Entry point — orchestrates all components
@@ -363,7 +363,7 @@ Files created:
 Packaging:
 - `build.spec` — PyInstaller spec (onedir, console=False)
 - `installer/build.iss` — Inno Setup 6, installs to My Documents (no UAC), desktop shortcut checkbox
-- `build.bat` — runs PyInstaller then Inno Setup → installer/DriftLine_Setup.exe
+- `build.bat` — runs PyInstaller then Inno Setup → installer/CoDrifter_Setup.exe
 - `env.template` — API key template shown to user post-install
 
 UI design decisions:
@@ -478,7 +478,7 @@ Accent: #FF4A4A. Green: #22C55E. Purple: #A855F7. Indigo: #6366F1. Text: #E0DDD8
 
 ## Portfolio Context
 
-DriftLine is part of a broader AI engineering portfolio:
+CoDrifter is part of a broader AI engineering portfolio:
 
 **SharpIQ** — Production multi-agent sports analytics SaaS
 - Live at sharpiq.online
