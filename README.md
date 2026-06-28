@@ -6,7 +6,7 @@ CoDrifter is a real-time AI voice co-driver for Assetto Corsa. It reads live tel
 
 ## What It Does
 
-As you approach a corner carrying too much speed, CoDrifter says:
+You're mid-corner, the car starts to straighten. Before you've even registered it, CoDrifter says:
 
 > *"Wait — let it rotate first."*
 
@@ -21,16 +21,22 @@ After the session ends, Claude analyzes the full telemetry log and generates a s
 ```
 Assetto Corsa (Windows Shared Memory)
             ↓
-    telemetry/reader.py        — reads 60 fields at 60hz, logs to CSV
+    telemetry/reader.py        — reads 60+ fields at 60hz, logs every frame to CSV
             ↓
-    prediction/model.py        — XGBoost classifier, < 5ms inference
+    prediction/features.py     — 30-frame rolling window → 20 engineered features
             ↓
-    voice/coach.py             — ElevenLabs Flash v2.5, < 300ms latency
+    prediction/model.py        — XGBoost classifier, < 5ms inference per frame
+            ↓
+    voice/coach.py             — ElevenLabs Flash v2.5, < 300ms end-to-end latency
+            ↓
+    voice/approach.py          — position-based corner entry/exit callouts
             ↓
     [session ends]
             ↓
     debrief/claude_debrief.py  — Claude Sonnet post-session analysis
 ```
+
+Everything from telemetry read to voice output runs in under 300ms. API calls and CSV writes are fully threaded — the 60hz main loop never blocks.
 
 ---
 
@@ -40,7 +46,7 @@ Assetto Corsa (Windows Shared Memory)
 |---|---|
 | Language | Python 3.11 |
 | Telemetry | Assetto Corsa Shared Memory (Windows) |
-| ML Model | XGBoost — real-time mistake classification |
+| ML Model | XGBoost — real-time drift mistake classification |
 | Voice | ElevenLabs Flash v2.5 — low-latency streaming TTS |
 | AI Debrief | Claude Sonnet (Anthropic API) — post-session analysis |
 | UI | PyQt6 — desktop app with live telemetry dashboard |
@@ -48,38 +54,54 @@ Assetto Corsa (Windows Shared Memory)
 
 ---
 
-## Mistake Detection
+## Prediction Model
 
-CoDrifter classifies each telemetry frame into one of four drift-specific categories:
+The core of CoDrifter is an XGBoost classifier that runs on every telemetry frame at 60hz.
 
-| Class | Description |
+**How it works:**
+
+Each frame, `prediction/features.py` takes a 30-frame rolling window (~0.5 seconds of history) and engineers 20 features from it — things like rate of yaw change, wheel slip delta, speed trend, and throttle/steering correlation. These capture the *dynamics* of what the car is doing, not just a single snapshot.
+
+The XGBoost model classifies that feature vector into one of four drift-specific classes:
+
+| Class | What it means |
 |---|---|
-| `LOSING_ANGLE` | Car straightening mid-corner unintentionally |
-| `SPEED_LOSS` | Bleeding speed without rear slip |
-| `SNAP_RISK` | Erratic yaw — on the edge of spinning |
+| `LOSING_ANGLE` | Car is straightening mid-corner — rotation is bleeding out |
+| `SPEED_LOSS` | Losing speed without meaningful rear slip — inefficient |
+| `SNAP_RISK` | Yaw rate is erratic — car is close to spinning |
 | `CLEAN` | No mistake detected |
 
-The XGBoost model uses a 30-frame rolling window of engineered features including yaw rate, local velocity, wheel slip, and tyre temperature. Inference time is under 5ms per frame.
+If the prediction exceeds a configurable confidence threshold (default 90%), a voice callout fires.
+
+**Why 90% confidence?** At lower thresholds the model calls too many borderline frames that aren't actually mistakes. At 90% it only speaks up when it's certain — which keeps the co-driver feeling useful rather than noisy.
+
+**Extended telemetry fields** logged per frame include yaw rate, local velocity (X/Y), wheel slip per corner, tyre temperature per corner, TC active, and ABS active. These give the model genuine insight into rotational dynamics — far more signal than speed/throttle/brake alone. The richer the training data, the more precisely it can distinguish a controlled slide from a genuine mistake.
 
 ---
 
 ## Voice Callouts
 
-Callouts fire when a mistake is detected above a configurable confidence threshold (default 90%). A 5-second per-type cooldown and 2-second minimum gap between any callouts prevent spam.
+Two callout systems run in parallel:
 
-Corner approach and exit callouts fire on a position-based system using a mapped corner file — 13 corners mapped on Drift Playground 2021.
+**Mistake callouts** — fire when the prediction model exceeds the confidence threshold. Cooldown rules prevent spam: 5 seconds per mistake type, 2 seconds minimum between any callout, suppressed in pit lane or with engine off.
+
+**Corner callouts** — position-based, fired from a mapped corner file. Entry callouts fire ~2 seconds before the corner. Exit callouts fire at the apex/exit point with type-specific advice based on corner classification (tight, medium, hairpin, sweeping, feeder).
+
+13 corners are mapped on Drift Playground 2021 with hotkey-configurable mapping in the Tracks tab.
 
 ---
 
 ## Post-Session Debrief
 
-After each session, Claude Sonnet reads a summarized version of the telemetry log and returns a structured debrief covering:
+After each session, Claude Sonnet reads a summarized version of the telemetry log — not raw CSV rows, a structured digest — and returns a debrief covering:
 
 - Best and worst sectors
-- Most frequent mistakes
+- Most frequent mistake types
 - Lap time consistency score
 - Top 3 actionable improvements
-- Comparison to previous session
+- Comparison to the previous session
+
+The debrief renders in the app automatically after a session ends if auto-debrief is enabled in Settings.
 
 ---
 
@@ -87,11 +109,11 @@ After each session, Claude Sonnet reads a summarized version of the telemetry lo
 
 The PyQt6 desktop app wraps all components with a dark-themed UI:
 
-- **Dashboard** — live speed, gear, RPM, input bars, AI prediction badge, lap times, telemetry trace
-- **History** — browse past sessions with lap stats
-- **Debrief** — rendered Claude debrief after each session
-- **Tracks** — map corner entry/exit positions with configurable hotkeys
-- **Settings** — API keys, voice volume, cooldown timings, confidence threshold, model training
+- **Dashboard** — live speed, gear, RPM, throttle/brake/steering bars, AI prediction badge, lap times, rolling telemetry trace
+- **History** — browse past sessions with lap count, best lap, and average lap
+- **Debrief** — rendered Claude debrief with per-section cards
+- **Tracks** — map corner entry/exit positions with configurable hotkey binds, corner type tagging
+- **Settings** — API keys, voice volume, cooldown timings, confidence threshold, callout toggles, model training trigger
 
 ---
 
@@ -99,10 +121,12 @@ The PyQt6 desktop app wraps all components with a dark-themed UI:
 
 | Requirement | Target |
 |---|---|
-| Telemetry read rate | 60hz |
+| Telemetry read rate | 60hz — never drop below 30hz |
+| Feature engineering | < 2ms per frame |
 | XGBoost inference | < 5ms per frame |
-| Voice latency | < 300ms |
-| Main loop blocking | Never — all API calls threaded |
+| Voice latency | < 300ms end-to-end |
+| Main loop blocking | Never — all I/O and API calls threaded |
+| CSV write | Every frame via async background thread |
 
 ---
 
@@ -110,7 +134,7 @@ The PyQt6 desktop app wraps all components with a dark-themed UI:
 
 ```
 CoDrifter/
-├── app.py                    # Entry point
+├── app.py                    # Entry point (PyQt6 desktop app)
 ├── main.py                   # CLI entry point
 ├── build.spec                # PyInstaller spec
 ├── build.bat                 # One-command build → installer
@@ -123,15 +147,15 @@ CoDrifter/
 │
 ├── prediction/
 │   ├── features.py           # 30-frame rolling window feature engineering
-│   ├── labels.py             # Threshold-based auto-labeling
-│   ├── trainer.py            # Offline XGBoost training
-│   └── model.py              # Real-time inference
+│   ├── labels.py             # Threshold-based auto-labeling for training data
+│   ├── trainer.py            # Offline XGBoost training script
+│   └── model.py              # Real-time inference + confidence thresholding
 │
 ├── voice/
 │   ├── coach.py              # ElevenLabs Flash v2.5 integration
 │   ├── callouts.py           # Callout text per mistake type
-│   ├── cooldown.py           # Spam prevention logic
-│   └── approach.py           # Position-based corner callouts
+│   ├── cooldown.py           # Spam prevention — per-type and global cooldowns
+│   └── approach.py           # Position-based corner entry/exit callouts
 │
 ├── debrief/
 │   └── claude_debrief.py     # Post-session Claude Sonnet analysis
@@ -143,8 +167,8 @@ CoDrifter/
     ├── debrief_tab.py        # Debrief renderer
     ├── tracks_tab.py         # Corner mapping tool
     ├── settings_tab.py       # Settings UI
-    ├── telemetry_worker.py   # QThread worker — bridges telemetry to UI
-    ├── theme.py              # Color palette + QSS stylesheet
+    ├── telemetry_worker.py   # QThread worker — bridges telemetry to UI signals
+    ├── theme.py              # Color palette + global QSS stylesheet
     └── settings_manager.py   # JSON settings persistence
 ```
 
