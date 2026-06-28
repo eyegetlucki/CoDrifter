@@ -1,5 +1,7 @@
 @echo off
 setlocal
+:: Always run from the directory this script lives in
+cd /d "%~dp0"
 
 echo.
 echo =============================================
