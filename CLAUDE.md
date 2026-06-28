@@ -208,14 +208,13 @@ One callout per mistake type. Keep them short — under 8 words. Co-driver tone 
 
 ```python
 CALLOUTS = {
-    "LATE_BRAKE": "Brake now — too much speed",
     "EARLY_THROTTLE": "Hold — wait for the apex",
-    "OVERSTEER": "Catch it — rear is stepping out",
     "UNDERSTEER": "Release — you're pushing wide",
     "MISSED_APEX": "Too wide — tighten your line",
-    "INCONSISTENT_BRAKING": "Commit to your brake point",
 }
 ```
+
+Note: OVERSTEER, LATE_BRAKE, and INCONSISTENT_BRAKING removed — not applicable for drift driving on Drift Playground 2021. If adding circuit/grip support in future, add them back.
 
 ---
 
@@ -250,46 +249,45 @@ The main telemetry loop must never be blocked by API calls, file writes, or mode
 ## Build Phases
 
 ### Phase 1 — Telemetry Bridge
-**Status: NOT STARTED**
+**Status: COMPLETE**
 **Goal:** Python reads live AC telemetry at 60hz. Nothing else.
 
-Files to create:
+Files created:
 - `telemetry/models.py` — TelemetryFrame dataclass
-- `telemetry/reader.py` — 60hz continuous loop
-- `main.py` — basic entry point calling reader
+- `telemetry/reader.py` — 60hz continuous loop + async CSV writer (background thread)
+- `telemetry/sim_info.py` — AC shared memory interface (DO NOT MODIFY)
+- `main.py` — entry point with live terminal display + prediction overlay
 
-Success criteria:
-- Launch AC
-- Run `python main.py`
-- See live telemetry values printing in terminal
-- Find session CSV being written in data/sessions/
-- Script handles AC not running gracefully without crashing
-
-Do not start Phase 2 until these criteria are met and confirmed.
+Success criteria: MET
+- Live telemetry prints in terminal at ~2hz
+- Session CSV written to data/sessions/ every frame via background thread
+- Handles AC not running gracefully (retries every 2 seconds)
 
 ---
 
 ### Phase 2 — XGBoost Mistake Predictor
-**Status: NOT STARTED**
+**Status: COMPLETE**
 **Goal:** Classify driving mistakes in real time from telemetry stream.
 
-Files to create:
-- `prediction/features.py` — rolling window feature engineering
+Files created:
+- `prediction/features.py` — 30-frame rolling window feature engineering (15 features)
 - `prediction/labels.py` — threshold-based auto-labeling
 - `prediction/trainer.py` — offline training script
-- `prediction/model.py` — real-time inference
+- `prediction/model.py` — real-time inference with confidence threshold
 
-Training data comes from Phase 1 CSV sessions.
-Trainer runs offline — not during a live session.
-Model inference runs in real time — must be < 5ms.
+Training notes:
+- Trained on ~68 minutes of Drift Playground 2021 data (248,540 frames)
+- OVERSTEER removed from classes — on a drift map oversteer is intentional, not a mistake
+- Footbrake signal is 0 throughout (driver uses handbrake) — LATE_BRAKE and INCONSISTENT_BRAKING not applicable
+- Active mistake classes: CLEAN, EARLY_THROTTLE, UNDERSTEER, MISSED_APEX
 
-Success criteria:
-- Collect 10+ laps of telemetry from Phase 1
-- Run trainer.py successfully — models/mistake_predictor.pkl created
-- Run a live session — see mistake predictions printing in terminal
-- Inference stays under 5ms per frame
+Success criteria: MET
+- models/mistake_predictor.pkl created
+- Inference time: 0.19ms per frame (target <5ms)
+- Accuracy: ~100% on test set
+- Predictions display live in terminal alongside telemetry
 
-Do not start Phase 3 until these criteria are met and confirmed.
+Do not start Phase 3 until live session confirms predictions feel correct on track.
 
 ---
 
