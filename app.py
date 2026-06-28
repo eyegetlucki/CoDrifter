@@ -26,8 +26,12 @@ def main():
     font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
     app.setFont(font)
 
+    _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "driftline.ico")
+    icon = QIcon(_icon_path)
+    app.setWindowIcon(icon)
+
     window = MainWindow()
-    window.setWindowIcon(QIcon("driftline.ico"))
+    window.setWindowIcon(icon)
     window.show()
 
     sys.exit(app.exec())

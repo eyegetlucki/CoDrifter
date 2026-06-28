@@ -361,10 +361,11 @@ Files created:
 - `ui/main_window.py` — sidebar nav, QStackedWidget pages, session lifecycle
 
 Packaging:
-- `build.spec` — PyInstaller spec (onedir, console=False)
-- `installer/build.iss` — Inno Setup 6, installs to My Documents (no UAC), desktop shortcut checkbox
+- `build.spec` — PyInstaller spec (onedir, console=False), icon=driftline.ico embedded in exe
+- `installer/build.iss` — Inno Setup 6, installs to My Documents (no UAC), desktop shortcut checkbox, post-install "Launch CoDrifter" option
 - `build.bat` — runs PyInstaller then Inno Setup → installer/CoDrifter_Setup.exe
-- `env.template` — API key template shown to user post-install
+- `driftline.ico` must be a real ICO (not renamed PNG) — if broken, reconvert via Pillow before building
+- App icon set on both QApplication and MainWindow via absolute path in app.py
 
 UI design decisions:
 - API keys stored in .env only, never in settings.json
