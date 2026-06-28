@@ -20,6 +20,7 @@ a = Analysis(
         # App assets — land next to the exe (root of dist/CoDrifter/)
         ("driftline.ico",           "."),
         ("driftlinewordmark.png",   "."),
+        ("version.py",              "."),
         # Bundled data
         ("data/corner_map.json",    "data"),
         # Package data

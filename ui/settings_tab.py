@@ -2,6 +2,8 @@ import os
 import glob
 import threading
 
+from version import __version__
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QCheckBox, QLineEdit, QPushButton,
@@ -230,9 +232,15 @@ class SettingsTab(QWidget):
         outer.setContentsMargins(24, 20, 24, 20)
         outer.setSpacing(0)
 
+        title_row = QHBoxLayout()
         title = QLabel("Settings")
         title.setStyleSheet(f"color: {T.TEXT_PRIMARY}; font-size: 18px; font-weight: 600; margin-bottom: 16px;")
-        outer.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        ver_lbl = QLabel(f"v{__version__}")
+        ver_lbl.setStyleSheet(f"color: {T.TEXT_DIM}; font-size: 11px; margin-bottom: 16px;")
+        title_row.addWidget(ver_lbl)
+        outer.addLayout(title_row)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

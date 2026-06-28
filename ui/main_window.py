@@ -5,9 +5,13 @@ import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QStackedWidget, QFrame, QSizePolicy,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSlot, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
+
+from version import __version__
+from ui.updater import UpdateChecker
 
 import ui.theme as T
 from ui.settings_manager import SettingsManager
@@ -107,10 +111,20 @@ class MainWindow(QMainWindow):
         self._worker: TelemetryWorker | None = None
         self._thread: QThread | None = None
         self._session_active = False
+        self._update_installer_path: str | None = None
+        self._pending_download_url: str | None = None
 
         self._build_ui()
         self._nav_to("dashboard")
         self._apply_titlebar_theme()
+
+        # Check for updates in background — silent on failure
+        self._updater = UpdateChecker()
+        self._updater.update_available.connect(self._on_update_available)
+        self._updater.download_progress.connect(self._on_download_progress)
+        self._updater.download_ready.connect(self._on_download_ready)
+        self._updater.download_failed.connect(self._on_download_failed)
+        self._updater.check_async()
 
     def _apply_titlebar_theme(self):
         if sys.platform != "win32":
@@ -219,6 +233,44 @@ class MainWindow(QMainWindow):
         outer.addWidget(sidebar)
 
         # ── Content area ──────────────────────────────────────────────
+        right_col = QWidget()
+        right_col.setStyleSheet("background: transparent;")
+        right_col_layout = QVBoxLayout(right_col)
+        right_col_layout.setContentsMargins(0, 0, 0, 0)
+        right_col_layout.setSpacing(0)
+
+        # Update banner — hidden until an update is detected
+        self._update_banner = QWidget()
+        self._update_banner.setFixedHeight(40)
+        self._update_banner.setStyleSheet(
+            "background-color: #2A1F00; border-bottom: 1px solid #4A3800;"
+        )
+        self._update_banner.setVisible(False)
+        banner_row = QHBoxLayout(self._update_banner)
+        banner_row.setContentsMargins(20, 0, 20, 0)
+        banner_row.setSpacing(12)
+
+        self._banner_lbl = QLabel()
+        self._banner_lbl.setStyleSheet("color: #E8A020; font-size: 12px; background: transparent; border: none;")
+        banner_row.addWidget(self._banner_lbl)
+        banner_row.addStretch()
+
+        self._banner_btn = QPushButton()
+        self._banner_btn.setFixedHeight(26)
+        self._banner_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._banner_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #4A3800; color: #E8A020;
+                border: 1px solid #6A5200; border-radius: 5px;
+                font-size: 11px; font-weight: 600; padding: 0 12px;
+            }}
+            QPushButton:hover {{ background: #5A4600; }}
+        """)
+        self._banner_btn.clicked.connect(self._on_banner_btn_clicked)
+        banner_row.addWidget(self._banner_btn)
+
+        right_col_layout.addWidget(self._update_banner)
+
         self._stack = QStackedWidget()
         self._stack.setStyleSheet(f"background-color: {T.BG_DEEP};")
 
@@ -238,7 +290,8 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._tracks)       # 3
         self._stack.addWidget(self._settings_tab) # 4
 
-        outer.addWidget(self._stack, 1)
+        right_col_layout.addWidget(self._stack, 1)
+        outer.addWidget(right_col, 1)
 
         # Wire cross-tab signals
         self._history.session_selected.connect(self._on_session_selected)
@@ -318,6 +371,52 @@ class MainWindow(QMainWindow):
     def _on_settings_changed(self):
         if self._worker:
             self._worker.reload_settings()
+
+    # ── Update slots ──────────────────────────────────────────────────
+
+    def _on_update_available(self, version: str, url: str):
+        self._pending_download_url = url
+        self._banner_lbl.setText(f"↓  CoDrifter v{version} is available")
+        self._banner_btn.setText("Download & Install")
+        self._banner_btn.setEnabled(True)
+        self._update_banner.setVisible(True)
+
+    def _on_banner_btn_clicked(self):
+        if self._update_installer_path:
+            self._install_update()
+        elif self._pending_download_url:
+            self._banner_btn.setEnabled(False)
+            self._banner_btn.setText("Downloading…")
+            self._updater.download_async(self._pending_download_url)
+
+    def _on_download_progress(self, pct: int):
+        self._banner_btn.setText(f"Downloading…  {pct}%")
+
+    def _on_download_ready(self, path: str):
+        self._update_installer_path = path
+        self._banner_lbl.setText("Update downloaded — ready to install")
+        self._banner_btn.setText("Restart & Install")
+        self._banner_btn.setEnabled(True)
+
+    def _on_download_failed(self, error: str):
+        self._banner_lbl.setText("Download failed — try again later")
+        self._banner_btn.setText("Retry")
+        self._banner_btn.setEnabled(True)
+        self._update_installer_path = None
+
+    def _install_update(self):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Install update")
+        msg.setText(
+            "CoDrifter will close and the update will install automatically.\n\n"
+            "Any active session will be stopped first."
+        )
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Ok)
+        if msg.exec() == QMessageBox.StandardButton.Ok:
+            self._updater.install(self._update_installer_path)
 
     def closeEvent(self, event):
         self._stop_session()
