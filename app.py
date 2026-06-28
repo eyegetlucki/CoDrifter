@@ -18,6 +18,17 @@ from ui.main_window import MainWindow
 from ui.theme import STYLESHEET
 
 
+def _asset(filename: str) -> str:
+    """
+    Resolve a bundled asset path for both dev and frozen (PyInstaller) modes.
+    In frozen mode PyInstaller 6+ puts datas in _internal/ (sys._MEIPASS), not
+    next to the exe, so relative paths from cwd don't work for assets.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, filename)
+    return filename  # cwd is already set to project root above
+
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("CoDrifter")
@@ -29,11 +40,10 @@ def main():
     font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
     app.setFont(font)
 
-    _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "driftline.ico")
-    icon = QIcon(_icon_path)
+    icon = QIcon(_asset("driftline.ico"))
     app.setWindowIcon(icon)
 
-    window = MainWindow()
+    window = MainWindow(_asset("driftlinewordmark.png"))
     window.setWindowIcon(icon)
     window.show()
 

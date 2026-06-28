@@ -96,11 +96,12 @@ class NavButton(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, wordmark_path: str = "driftlinewordmark.png"):
         super().__init__()
         self.setWindowTitle("CoDrifter")
         self.setMinimumSize(960, 660)
         self.resize(1140, 740)
+        self._wordmark_path = wordmark_path
 
         self._settings = SettingsManager()
         self._worker: TelemetryWorker | None = None
@@ -169,7 +170,7 @@ class MainWindow(QMainWindow):
         logo = QLabel()
         logo.setStyleSheet("background: transparent; border: none;")
         from PyQt6.QtGui import QPixmap
-        pixmap = QPixmap("driftlinewordmark.png").scaled(
+        pixmap = QPixmap(self._wordmark_path).scaled(
             210, 72,
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,

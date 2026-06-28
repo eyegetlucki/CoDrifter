@@ -31,8 +31,10 @@ class VoiceCoach:
             "LOSING_ANGLE": True, "SPEED_LOSS": True, "SNAP_RISK": True,
         }
 
-    def load_corner_map(self, track_slug: str = ""):
+    def load_corner_map(self, track_slug: str = "", track_length_m: float | None = None):
         self._approach.load(track_slug)
+        if track_length_m is not None:
+            self._approach.set_track_length(track_length_m)
 
     def update_settings(self, same_mistake_cooldown: float, any_callout_cooldown: float,
                         approach_enabled: bool, enabled_mistakes: dict):

@@ -9,7 +9,7 @@ from typing import Optional
 
 CORNER_MAP_PATH      = os.path.join("data", "corner_map.json")
 TRACK_MAPS_DIR       = os.path.join("data", "track_maps")
-TRACK_LENGTH_M = 783.413
+_DEFAULT_TRACK_LENGTH_M = 783.413  # Drift Playground 2021 fallback
 WARNING_SECONDS = 2.0
 
 MIN_WARNING_OFFSET = 0.025
@@ -105,6 +105,11 @@ class CornerApproachDetector:
         self._triggered: set[int] = set()
         self._exit_triggered: set[int] = set()
         self._loaded = False
+        self._track_length_m: float = _DEFAULT_TRACK_LENGTH_M
+
+    def set_track_length(self, meters: float):
+        if meters and meters > 0:
+            self._track_length_m = meters
 
     def load(self, track_slug: str = "") -> bool:
         """Load corner map. Tries active track slug first, falls back to legacy path."""
@@ -123,14 +128,22 @@ class CornerApproachDetector:
             raw = json.load(f)
 
         # Support both array format and {name, corners} dict format
-        self._corners = raw if isinstance(raw, list) else raw.get("corners", [])
+        if isinstance(raw, list):
+            self._corners = raw
+        else:
+            self._corners = raw.get("corners", [])
+            track_length = raw.get("track_length_m")
+            if track_length and track_length > 0:
+                self._track_length_m = float(track_length)
+
         self._loaded = True
-        print(f"Corner map loaded: {len(self._corners)} corners from {path}")
+        print(f"Corner map loaded: {len(self._corners)} corners from {path} "
+              f"(track length: {self._track_length_m:.1f}m)")
         return True
 
     def _warning_offset(self, speed_kmh: float) -> float:
         speed_ms = speed_kmh / 3.6
-        offset = (speed_ms * WARNING_SECONDS) / TRACK_LENGTH_M
+        offset = (speed_ms * WARNING_SECONDS) / self._track_length_m
         return max(MIN_WARNING_OFFSET, min(MAX_WARNING_OFFSET, offset))
 
     def is_in_corner(self, normalized_pos: float) -> bool:

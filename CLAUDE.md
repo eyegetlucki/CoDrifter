@@ -365,9 +365,11 @@ Packaging:
 - `installer/build.iss` — Inno Setup 6, installs to My Documents (no UAC), desktop shortcut checkbox, post-install "Launch CoDrifter" option
 - `build.bat` — runs PyInstaller then Inno Setup → installer/CoDrifter_Setup.exe
 - `driftline.ico` must be a real ICO (not renamed PNG) — if broken, reconvert via Pillow before building
-- App icon set on both QApplication and MainWindow via absolute path in app.py
 - `build.bat` must have CRLF line endings — LF breaks cmd.exe (.gitattributes enforces this)
 - In frozen exe, `app.py` uses `sys.executable` (not `__file__`) to set working dir — `__file__` resolves inside `_internal/` and breaks all relative data/ paths
+- PyInstaller 6+ puts all datas into `_internal/` (sys._MEIPASS), NOT next to the exe — use `_asset()` helper in app.py to resolve bundled assets. Returns `sys._MEIPASS + filename` when frozen, bare `filename` when dev (cwd = project root)
+- `driftline.ico` and `driftlinewordmark.png` must be in build.spec datas with destination `"."` — they land in `_internal/` and are resolved via `_asset()`
+- App icon and wordmark path are both resolved via `_asset()` in app.py and passed to MainWindow as a constructor arg
 - Session CSVs can be migrated by copying to `Documents\CoDrifter\data\sessions\` after reinstall
 
 UI design decisions:
@@ -376,6 +378,14 @@ UI design decisions:
 - Train Model button runs trainer.py in background thread, badge updates on completion
 - Checkmark SVG embedded as base64 in QSS — no external image files needed
 - All text sentence case (not ALL CAPS) — cleaner, less aggressive
+
+Post-Phase 4 additions:
+- `telemetry/spline.py` — parses AC `fast_lane.ai` binary spline (16 bytes/point: x,y,z,segment_length float32). Returns real track length in meters. Checks both `aim/` and `ai/` subfolders. Handles cm vs m units via sanity check (200–20000m). Used to replace hardcoded TRACK_LENGTH_M in approach.py
+- Track map JSON format: `{ "name": "...", "track_length_m": 581.7, "corners": [...] }` — track_length_m loaded automatically by CornerApproachDetector.load(), drives warning distance calculation
+- ADC Klutch Kickers Drifters Paradise mapped: `data/track_maps/adc_klutch_kickers_drifters_paradise.json`, track_length_m=581.7m (parsed from spline), corners empty pending rig session
+- Tracks tab: "TRACK LENGTH" row with editable field + "Auto-detect from AC folder" button (opens folder picker, calls find_spline + parse_fast_lane, saves result to JSON)
+- `_clear_right()` in tracks_tab.py recursively purges nested layouts — original only deleted direct widget children, causing button duplication on track re-select
+- `ui/tracks_tab.py` header row split into two rows: name + "Save name" on top, "Set Active" + "Delete track" below
 
 Do not start Phase 5 until these criteria are met and confirmed.
 

@@ -17,8 +17,11 @@ a = Analysis(
     pathex=["."],
     binaries=elevenlabs_bins + anthropic_bins + xgboost_bins,
     datas=[
-        # Bundled assets — placed at their relative path next to the exe
-        ("data/corner_map.json",  "data"),
+        # App assets — land next to the exe (root of dist/CoDrifter/)
+        ("driftline.ico",           "."),
+        ("driftlinewordmark.png",   "."),
+        # Bundled data
+        ("data/corner_map.json",    "data"),
         # Package data
         *elevenlabs_datas,
         *anthropic_datas,

@@ -232,6 +232,7 @@ class TracksTab(QWidget):
 
         # refs to right-panel widgets (rebuilt each time a track is selected)
         self._name_field: QLineEdit | None = None
+        self._length_field: QLineEdit | None = None
         self._corner_table: QTableWidget | None = None
         self._map_entries_btn: QPushButton | None = None
         self._map_exits_btn: QPushButton | None = None
@@ -344,10 +345,14 @@ class TracksTab(QWidget):
         outer.addWidget(self._right, 1)
 
     def _clear_right(self):
-        while self._right_layout.count():
-            item = self._right_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        def _purge(layout):
+            while layout.count():
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+                elif item.layout():
+                    _purge(item.layout())
+        _purge(self._right_layout)
 
     def _show_empty_state(self):
         self._clear_right()
@@ -405,9 +410,9 @@ class TracksTab(QWidget):
         active_slug = self._settings.get("active_track", "")
         is_active = slug == active_slug
 
-        # Header
-        header_row = QHBoxLayout()
-        header_row.setSpacing(8)
+        # Header — name field + save on row 1, action buttons on row 2
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
 
         self._name_field = QLineEdit(data.get("name", slug))
         self._name_field.setFixedHeight(36)
@@ -419,18 +424,28 @@ class TracksTab(QWidget):
             }}
             QLineEdit:focus {{ border-color: {T.ACCENT}; }}
         """)
-        header_row.addWidget(self._name_field, 1)
+        name_row.addWidget(self._name_field, 1)
 
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton("Save name")
         save_btn.setFixedHeight(36)
-        save_btn.setFixedWidth(64)
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {T.TEXT_SECONDARY};
+                border: 1px solid {T.BORDER}; border-radius: 7px;
+                font-size: 12px; padding: 0 14px;
+            }}
+            QPushButton:hover {{ border-color: {T.BORDER_LIT}; color: {T.TEXT_PRIMARY}; }}
+        """)
         save_btn.clicked.connect(lambda: self._save_name(slug))
-        header_row.addWidget(save_btn)
+        name_row.addWidget(save_btn)
+        self._right_layout.addLayout(name_row)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
 
         active_btn = QPushButton("✓  Active" if is_active else "Set Active")
-        active_btn.setFixedHeight(36)
-        active_btn.setFixedWidth(110)
+        active_btn.setFixedHeight(32)
         active_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         active_btn.setEnabled(not is_active)
         active_btn.setStyleSheet(f"""
@@ -438,27 +453,76 @@ class TracksTab(QWidget):
                 background: {'#0A2010' if is_active else T.ACCENT};
                 color: {T.GREEN if is_active else 'white'};
                 border: {'1px solid #1A4020' if is_active else 'none'};
-                border-radius: 7px; font-size: 12px; font-weight: 600;
+                border-radius: 7px; font-size: 12px; font-weight: 600; padding: 0 16px;
             }}
             QPushButton:enabled:hover {{ background: {T.ACCENT_GLOW}; }}
             QPushButton:disabled {{ background: #0A2010; color: {T.GREEN}; }}
         """)
         active_btn.clicked.connect(lambda: self._set_active(slug))
-        header_row.addWidget(active_btn)
+        action_row.addWidget(active_btn)
 
-        del_btn = QPushButton("Delete")
-        del_btn.setFixedHeight(36)
+        del_btn = QPushButton("Delete track")
+        del_btn.setFixedHeight(32)
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         del_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {T.TEXT_DIM};
-                border: 1px solid {T.BORDER}; border-radius: 7px; font-size: 12px; padding: 0 12px;
+                border: 1px solid {T.BORDER}; border-radius: 7px; font-size: 12px; padding: 0 14px;
             }}
             QPushButton:hover {{ color: {T.ACCENT}; border-color: {T.ACCENT}; }}
         """)
         del_btn.clicked.connect(lambda: self._delete_track(slug))
-        header_row.addWidget(del_btn)
-        self._right_layout.addLayout(header_row)
+        action_row.addWidget(del_btn)
+        action_row.addStretch()
+        self._right_layout.addLayout(action_row)
+
+        # Track length row
+        length_row = QHBoxLayout()
+        length_row.setSpacing(8)
+
+        length_lbl = QLabel("TRACK LENGTH")
+        length_lbl.setStyleSheet(
+            f"color: {T.TEXT_SECONDARY}; font-size: 10px; font-weight: 600; letter-spacing: 1.5px;"
+        )
+        self._right_layout.addWidget(length_lbl)
+
+        self._length_field = QLineEdit(str(data.get("track_length_m", 783.413)))
+        self._length_field.setFixedHeight(32)
+        self._length_field.setFixedWidth(110)
+        self._length_field.setPlaceholderText("meters")
+        self._length_field.setStyleSheet(f"""
+            QLineEdit {{
+                background: {T.BG_CARD}; border: 1px solid {T.BORDER};
+                border-radius: 7px; padding: 0 10px;
+                color: {T.TEXT_PRIMARY}; font-size: 13px; font-family: Consolas, monospace;
+            }}
+            QLineEdit:focus {{ border-color: {T.ACCENT}; }}
+        """)
+
+        save_length_btn = QPushButton("Save")
+        save_length_btn.setFixedHeight(32)
+        save_length_btn.setFixedWidth(70)
+        save_length_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_length_btn.clicked.connect(lambda: self._save_track_length(slug))
+
+        auto_btn = QPushButton("Auto-detect from AC folder")
+        auto_btn.setFixedHeight(32)
+        auto_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        auto_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {T.TEXT_SECONDARY};
+                border: 1px solid {T.BORDER}; border-radius: 7px;
+                font-size: 11px; padding: 0 12px;
+            }}
+            QPushButton:hover {{ border-color: {T.BORDER_LIT}; color: {T.TEXT_PRIMARY}; }}
+        """)
+        auto_btn.clicked.connect(lambda: self._auto_detect_length(slug))
+
+        length_row.addWidget(self._length_field)
+        length_row.addWidget(save_length_btn)
+        length_row.addWidget(auto_btn)
+        length_row.addStretch()
+        self._right_layout.addLayout(length_row)
 
         # Corners label
         corners_lbl = QLabel("CORNERS")
@@ -786,6 +850,46 @@ class TracksTab(QWidget):
         _save_track(slug, data)
         self._refresh_list()
         self._select_track(slug)
+
+    def _save_track_length(self, slug: str):
+        if not hasattr(self, "_length_field") or self._length_field is None:
+            return
+        try:
+            meters = float(self._length_field.text().strip())
+            if meters <= 0:
+                raise ValueError
+        except ValueError:
+            return
+        data = _load_track(os.path.join(TRACKS_DIR, f"{slug}.json"))
+        if not data:
+            return
+        data["track_length_m"] = round(meters, 1)
+        _save_track(slug, data)
+
+    def _auto_detect_length(self, slug: str):
+        from telemetry.spline import find_spline, parse_fast_lane
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select AC track folder",
+            r"C:\Program Files (x86)\Steam\steamapps\common\assettocorsa\content\tracks",
+        )
+        if not folder:
+            return
+        spline_path = find_spline(folder)
+        if not spline_path:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Not found",
+                "No fast_lane.ai found in aim/ or ai/ inside the selected folder.")
+            return
+        length = parse_fast_lane(spline_path)
+        if length is None:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Parse failed",
+                "Found the spline file but could not extract a valid track length.\n"
+                "Enter the track length manually.")
+            return
+        if hasattr(self, "_length_field") and self._length_field:
+            self._length_field.setText(str(length))
+        self._save_track_length(slug)
 
     def _rebind_key(self, action: str, btn: QPushButton):
         dlg = _KeyBindDialog(action, self)
