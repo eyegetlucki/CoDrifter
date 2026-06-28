@@ -1,8 +1,11 @@
 import sys
 import os
 
-# Ensure working directory is always the project root
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# Ensure working directory is always the project root (works both frozen and as script)
+if getattr(sys, "frozen", False):
+    os.chdir(os.path.dirname(sys.executable))
+else:
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
 load_dotenv()
