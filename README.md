@@ -83,11 +83,11 @@ If the prediction exceeds a configurable confidence threshold (default 90%), a v
 
 Two callout systems run in parallel:
 
-**Mistake callouts** — fire when the prediction model exceeds the confidence threshold. Cooldown rules prevent spam: 5 seconds per mistake type, 2 seconds minimum between any callout, suppressed in pit lane or with engine off.
+**Mistake callouts** — fire when the prediction model exceeds the confidence threshold. Each mistake type has 4 randomized variations so the co-driver doesn't repeat the same line. Cooldown rules prevent spam: 5 seconds per mistake type, 2 seconds minimum between any callout, suppressed in pit lane or with engine off.
 
-**Corner callouts** — position-based, fired from a mapped corner file. Entry callouts fire ~2 seconds before the corner. Exit callouts fire at the apex/exit point with type-specific advice based on corner classification (tight, medium, hairpin, sweeping, feeder).
+**Corner callouts** — position-based, fired from a mapped corner file. Entry callouts are context-aware: CoDrifter reads your speed and yaw rate as you enter the warning bubble and diagnoses your approach — too fast, not yet sideways, or both. After 3 passes on a corner it learns your personal average entry speed and uses that as the threshold rather than a hardcoded number. Learned averages are saved per track and loaded back each session so accuracy improves over time. Exit callouts fire at the apex/exit point with type-specific advice.
 
-13 corners are mapped on Drift Playground 2021 with hotkey-configurable mapping in the Tracks tab.
+Per-corner speed learning is stored in `data/track_learning/<slug>.json` and is track-specific — Klutch Kickers and Drift Playground each build their own baselines independently.
 
 ---
 

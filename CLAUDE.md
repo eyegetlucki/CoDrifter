@@ -399,6 +399,27 @@ Accuracy improvements (no retrain required — rule-based):
 - `voice/approach.py`: `EXIT_YAW_THRESHOLD=15` deg/s — `check_exit()` returns None if `abs(yaw_rate) < 15`, suppressing exit callouts when not actually drifting.
 - Deferred (needs more data): per-corner-type warning time multipliers, speed floor per corner type, expanded corner active window.
 
+Training pipeline fixes:
+- `prediction/trainer.py`: remaps sparse class indices to contiguous before fitting — handles case where only CLEAN+SNAP_RISK present (no corners mapped). Auto-selects `binary:logistic` for 2 classes, `multi:softprob` + `num_class` for 3+. Saves `{"model": model, "class_names": [...]}` dict pickle.
+- `prediction/model.py`: loads new dict pickle format; `class_names` used for idx→class lookup; legacy raw model still supported.
+- `build.spec`: `collect_all("scipy")` added — fixes scipy error in standalone app trainer. scipy binaries/datas/hiddenimports all included.
+- `requirements.txt`: `scipy==1.17.1` pinned explicitly.
+- Fresh training data: 25 sessions from standalone app (OneDrive/Documents/CoDrifter/data/sessions/) used. Verified `yaw_rate` present. SNAP_RISK: 99% precision/recall at 0.27ms inference.
+
+Callout system improvements:
+- `voice/callouts.py`: 4 random variations per mistake type via `random.choice` instead of single fixed strings.
+- `voice/approach.py`: context-aware approach callouts — `check()` now takes `yaw_rate` param. At corner entry bubble, reads speed + yaw_rate and diagnoses:
+  - hot + not initiated → "Too fast and too straight — brake and initiate" (+ 2 variants)
+  - hot + sideways → "Hot into this one — scrub a bit more speed" (+ 2 variants)
+  - normal speed + not initiated → "Get sideways now — initiate before the corner" (+ 2 variants)
+  - good approach → standard corner-type callout (randomized)
+- Per-corner speed learning: `_approach_speeds: dict[int, list[float]]` built during session. Persisted to `data/track_learning/<slug>.json` on `stop()`. Loaded back on next session. `MIN_PASSES_FOR_SPEED_CTX=3`, `HOT_MULTIPLIER=1.15`, `MAX_SPEED_HISTORY=20`. Context callouts activate only after 3 passes — falls back to type callout before then.
+- `voice/coach.py`: `check_approach()` gains `yaw_rate=0.0` param; `_track_slug` stored on `load_corner_map()`; `stop()` calls `self._approach.save_learning()`.
+- `ui/telemetry_worker.py`: `check_approach()` call passes `yaw_rate=frame.yaw_rate`.
+- `prediction/labels.py`: `_load_corner_learning()` reads `data/track_learning/*.json` → per-corner avg speed dict. `_compute_hot_entry()` detects approach zone (1.5× CORNER_ACTIVE_RADIUS_M) + speed above avg. `label_dataframe()` computes `hot_entry` per frame as additional labeling signal — richer labels as more sessions accumulate per track.
+
+Note on `data/track_learning/`: NOT gitignored — this is per-driver learned data, commits optional. Keep locally, can be copied like session CSVs on reinstall.
+
 Do not start Phase 5 until these criteria are met and confirmed.
 
 ---
