@@ -19,6 +19,21 @@ After the session ends, Claude analyzes the full telemetry log and generates a s
 ## Architecture
 
 ```
+Session CSV (every session)
+        ↓
+Offline XGBoost retraining
+        ↓
+Smarter mistake detection over time
+
+Corner approach data (every session)
+        ↓
+Track learning JSON (persisted per track)
+        ↓
+Personal baseline calibration
+        ↓
+Hot-entry threshold = driver's own average + 15%
+
+```
 Assetto Corsa (Windows Shared Memory)
             ↓
     telemetry/reader.py        — reads 60+ fields at 60hz, logs every frame to CSV
