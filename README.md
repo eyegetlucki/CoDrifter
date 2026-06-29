@@ -33,7 +33,7 @@ Personal baseline calibration
         ↓
 Hot-entry threshold = driver's own average + 15%
 
-```
+
 Assetto Corsa (Windows Shared Memory)
             ↓
     telemetry/reader.py        — reads 60+ fields at 60hz, logs every frame to CSV
