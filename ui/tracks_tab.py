@@ -555,6 +555,36 @@ class TracksTab(QWidget):
         self._populate_corner_table(data.get("corners", []), slug)
         self._right_layout.addWidget(self._corner_table, 1)
 
+        # Clip zones label
+        clips_lbl = QLabel("CLIP ZONES")
+        clips_lbl.setStyleSheet(
+            f"color: {T.TEXT_SECONDARY}; font-size: 10px; font-weight: 600; letter-spacing: 1.5px;"
+        )
+        self._right_layout.addWidget(clips_lbl)
+
+        # Clip zones table
+        self._clip_table = QTableWidget()
+        self._clip_table.setColumnCount(5)
+        self._clip_table.setHorizontalHeaderLabels(["#", "Zone Entry", "Clip Point", "Zone Exit", ""])
+        ch = self._clip_table.horizontalHeader()
+        ch.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        ch.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        ch.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        ch.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        ch.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self._clip_table.setColumnWidth(0, 50)
+        self._clip_table.setColumnWidth(4, 36)
+        self._clip_table.verticalHeader().setVisible(False)
+        self._clip_table.setShowGrid(False)
+        self._clip_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._clip_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._clip_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._clip_table.setStyleSheet(
+            f"QTableWidget {{ background: {T.BG_CARD}; border: 1px solid {T.BORDER}; border-radius: 10px; }}"
+        )
+        self._populate_clip_table(data.get("clip_zones", []), slug)
+        self._right_layout.addWidget(self._clip_table)
+
         # Mapping card
         map_card = QFrame()
         map_card.setStyleSheet(
@@ -604,6 +634,7 @@ class TracksTab(QWidget):
 
         self._entry_key_btn = _bind_pair("Entry key", "F10", "Entry")
         self._exit_key_btn  = _bind_pair("Exit key",  "F11", "Exit")
+        self._clip_key_btn  = _bind_pair("Clip key",  "F9",  "Clip")
         self._undo_key_btn  = _bind_pair("Undo key",  "F12", "Undo")
         key_row.addStretch()
 
@@ -618,19 +649,43 @@ class TracksTab(QWidget):
         spv.setContentsMargins(0, 0, 0, 0)
         spv.setSpacing(10)
 
-        self._map_entries_btn = QPushButton("Start Entry Mapping")
+        self._map_entries_btn = QPushButton("Map Corner Entries")
         self._map_entries_btn.setFixedHeight(38)
         self._map_entries_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._map_entries_btn.clicked.connect(lambda: self._start_mapping(slug, "entries"))
 
-        self._map_exits_btn = QPushButton("Start Exit Mapping")
+        self._map_exits_btn = QPushButton("Map Corner Exits")
         self._map_exits_btn.setFixedHeight(38)
         self._map_exits_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._map_exits_btn.setEnabled(bool(data.get("corners")))
         self._map_exits_btn.clicked.connect(lambda: self._start_mapping(slug, "exits"))
 
+        clip_row = QHBoxLayout()
+        clip_row.setSpacing(10)
+
+        self._map_zone_entries_btn = QPushButton("Map Zone Entries")
+        self._map_zone_entries_btn.setFixedHeight(38)
+        self._map_zone_entries_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._map_zone_entries_btn.clicked.connect(lambda: self._start_mapping(slug, "zone_entries"))
+
+        self._map_clips_btn = QPushButton("Map Clip Points")
+        self._map_clips_btn.setFixedHeight(38)
+        self._map_clips_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._map_clips_btn.setEnabled(bool(data.get("clip_zones")))
+        self._map_clips_btn.clicked.connect(lambda: self._start_mapping(slug, "clips"))
+
+        self._map_zone_exits_btn = QPushButton("Map Zone Exits")
+        self._map_zone_exits_btn.setFixedHeight(38)
+        self._map_zone_exits_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._map_zone_exits_btn.setEnabled(bool(data.get("clip_zones")))
+        self._map_zone_exits_btn.clicked.connect(lambda: self._start_mapping(slug, "zone_exits"))
+
         spv.addWidget(self._map_entries_btn, 1)
         spv.addWidget(self._map_exits_btn, 1)
+        clip_row.addWidget(self._map_zone_entries_btn, 1)
+        clip_row.addWidget(self._map_clips_btn, 1)
+        clip_row.addWidget(self._map_zone_exits_btn, 1)
+        spv.addLayout(clip_row)
         mcl.addWidget(self._start_panel)
 
         # Live mapping panel (hidden until active)
@@ -746,6 +801,52 @@ class TracksTab(QWidget):
         except (RuntimeError, TypeError):
             pass
         self._corner_table.itemChanged.connect(lambda item: self._on_cell_edited(slug, item))
+
+    def _populate_clip_table(self, clip_zones: list, slug: str):
+        if not hasattr(self, "_clip_table") or self._clip_table is None:
+            return
+        self._clip_table.setRowCount(len(clip_zones))
+        for i, zone in enumerate(clip_zones):
+            num = QTableWidgetItem(str(i + 1))
+            num.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            num.setForeground(QColor(T.TEXT_DIM))
+            num.setFlags(num.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._clip_table.setItem(i, 0, num)
+
+            def _coord_item(x_key, z_key):
+                x = zone.get(x_key)
+                z = zone.get(z_key)
+                text = f"{x:.1f}, {z:.1f}" if x is not None and z is not None else "--"
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setForeground(QColor(T.TEXT_PRIMARY if x is not None else T.TEXT_DIM))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                return item
+
+            self._clip_table.setItem(i, 1, _coord_item("zone_entry_x", "zone_entry_z"))
+            self._clip_table.setItem(i, 2, _coord_item("clip_x", "clip_z"))
+            self._clip_table.setItem(i, 3, _coord_item("zone_exit_x", "zone_exit_z"))
+
+            del_btn = QPushButton()
+            del_btn.setIcon(_trash_icon("#666666"))
+            del_btn.setToolTip("Delete this clip zone")
+            del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            del_btn.setIconSize(QSize(14, 14))
+            del_btn.setStyleSheet(
+                "QPushButton { background: transparent; border: none; margin: 6px 8px; }"
+                "QPushButton:hover { background: transparent; }"
+            )
+            del_btn.clicked.connect(lambda _, row=i, s=slug: self._delete_clip_zone(s, row))
+            del_btn.enterEvent = lambda e, b=del_btn: b.setIcon(_trash_icon(T.ACCENT))
+            del_btn.leaveEvent = lambda e, b=del_btn: b.setIcon(_trash_icon("#666666"))
+            self._clip_table.setCellWidget(i, 4, del_btn)
+
+    def _delete_clip_zone(self, slug: str, row: int):
+        data = _load_track(os.path.join(TRACKS_DIR, f"{slug}.json"))
+        if data and row < len(data.get("clip_zones", [])):
+            data["clip_zones"].pop(row)
+            _save_track(slug, data)
+            self._populate_clip_table(data["clip_zones"], slug)
 
     # ── Actions ───────────────────────────────────────────────────────
 
@@ -911,17 +1012,33 @@ class TracksTab(QWidget):
 
         mark_key = (self._entry_key_btn.text().strip() or "F10") if self._entry_key_btn else "F10"
         exit_key  = (self._exit_key_btn.text().strip()  or "F11") if self._exit_key_btn  else "F11"
+        clip_key  = (self._clip_key_btn.text().strip()  or "F9")  if hasattr(self, "_clip_key_btn") and self._clip_key_btn else "F9"
         undo_key  = (self._undo_key_btn.text().strip()  or "F12") if self._undo_key_btn  else "F12"
-        hotkey = mark_key if mode == "entries" else exit_key
+
+        hotkey = {
+            "entries":      mark_key,
+            "exits":        exit_key,
+            "zone_entries": mark_key,
+            "clips":        clip_key,
+            "zone_exits":   exit_key,
+        }.get(mode, mark_key)
+
+        mode_labels = {
+            "entries":      ("corner entries",   "corner entry"),
+            "exits":        ("corner exits",     "corner exit"),
+            "zone_entries": ("zone entries",     "zone entry"),
+            "clips":        ("clip points",      "clip point"),
+            "zone_exits":   ("zone exits",       "zone exit"),
+        }
+        plural, singular = mode_labels.get(mode, (mode, mode))
 
         if self._start_panel:
             self._start_panel.setVisible(False)
         if self._mapping_panel:
             self._mapping_panel.setVisible(True)
         if self._mapping_mode_lbl:
-            label = "entries" if mode == "entries" else "exits"
             self._mapping_mode_lbl.setText(
-                f"● Mapping {label} — press {hotkey} at each corner {label[:-1]}"
+                f"● Mapping {plural} — press {hotkey} at each {singular}"
             )
         if self._mapping_marks_lbl:
             self._mapping_marks_lbl.setText("Marks: 0")
@@ -1026,20 +1143,53 @@ class TracksTab(QWidget):
                 {"corner": i + 1, "x": xz[0], "z": xz[1], "type": "MEDIUM"}
                 for i, xz in enumerate(positions)
             ]
-        else:
+        elif mode == "exits":
             for i, xz in enumerate(positions):
                 if i < len(data.get("corners", [])):
                     data["corners"][i]["exit_x"] = xz[0]
                     data["corners"][i]["exit_z"] = xz[1]
+        elif mode == "zone_entries":
+            # Create new clip_zones with zone entry positions
+            existing = data.get("clip_zones", [])
+            data["clip_zones"] = [
+                {
+                    "zone": i + 1,
+                    "zone_entry_x": xz[0], "zone_entry_z": xz[1],
+                    "clip_x": existing[i].get("clip_x") if i < len(existing) else None,
+                    "clip_z": existing[i].get("clip_z") if i < len(existing) else None,
+                    "zone_exit_x": existing[i].get("zone_exit_x") if i < len(existing) else None,
+                    "zone_exit_z": existing[i].get("zone_exit_z") if i < len(existing) else None,
+                    "clip_radius_m": existing[i].get("clip_radius_m", 3.0) if i < len(existing) else 3.0,
+                }
+                for i, xz in enumerate(positions)
+            ]
+        elif mode == "clips":
+            for i, xz in enumerate(positions):
+                if i < len(data.get("clip_zones", [])):
+                    data["clip_zones"][i]["clip_x"] = xz[0]
+                    data["clip_zones"][i]["clip_z"] = xz[1]
+        elif mode == "zone_exits":
+            for i, xz in enumerate(positions):
+                if i < len(data.get("clip_zones", [])):
+                    data["clip_zones"][i]["zone_exit_x"] = xz[0]
+                    data["clip_zones"][i]["zone_exit_z"] = xz[1]
 
         _save_track(slug, data)
 
         if self._corner_table:
-            self._populate_corner_table(data["corners"], slug)
+            self._populate_corner_table(data.get("corners", []), slug)
+        if hasattr(self, "_clip_table") and self._clip_table:
+            self._populate_clip_table(data.get("clip_zones", []), slug)
 
         has_corners = bool(data.get("corners"))
         if self._map_exits_btn:
             self._map_exits_btn.setEnabled(has_corners)
+
+        has_zones = bool(data.get("clip_zones"))
+        if hasattr(self, "_map_clips_btn") and self._map_clips_btn:
+            self._map_clips_btn.setEnabled(has_zones)
+        if hasattr(self, "_map_zone_exits_btn") and self._map_zone_exits_btn:
+            self._map_zone_exits_btn.setEnabled(has_zones)
 
         self._refresh_list()
 

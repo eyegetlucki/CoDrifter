@@ -106,11 +106,22 @@ def _get_exit_callout(corner_idx: int, corner_type: str) -> str:
     return text
 
 
+CLIP_MISS_CALLOUTS = [
+    "Too wide — you missed the clip",
+    "Wide of the clip — tighten up",
+    "Missed it — get closer to the clip",
+]
+_clip_miss_index = 0
+
+
 class CornerApproachDetector:
     def __init__(self):
         self._corners: list[dict] = []
+        self._clip_zones: list[dict] = []
         self._triggered: set[int] = set()
         self._exit_triggered: set[int] = set()
+        self._zone_active: set[int] = set()    # currently inside a judged zone
+        self._clip_hit: set[int] = set()       # clipped this zone this pass
         self._loaded = False
 
     def load(self, track_slug: str = "") -> bool:
@@ -130,10 +141,11 @@ class CornerApproachDetector:
             raw = json.load(f)
 
         corners = raw if isinstance(raw, list) else raw.get("corners", [])
+        self._clip_zones = raw.get("clip_zones", []) if isinstance(raw, dict) else []
 
         # Only keep corners that have world position data
         self._corners = [c for c in corners if "x" in c and "z" in c]
-        self._loaded = bool(self._corners)
+        self._loaded = bool(self._corners) or bool(self._clip_zones)
 
         total = len(corners)
         usable = len(self._corners)
@@ -172,6 +184,44 @@ class CornerApproachDetector:
                     return _get_exit_callout(i, corner_type)
             else:
                 self._exit_triggered.discard(i)
+        return None
+
+    def check_clips(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
+        """Check clip zones — fires a miss callout when exiting a zone without hitting the clip."""
+        global _clip_miss_index
+        if not self._clip_zones or speed_kmh < 10:
+            return None
+        for i, zone in enumerate(self._clip_zones):
+            ex = zone.get("zone_entry_x")
+            ez = zone.get("zone_entry_z")
+            xx = zone.get("zone_exit_x")
+            xz = zone.get("zone_exit_z")
+            cx = zone.get("clip_x")
+            cz = zone.get("clip_z")
+            radius = zone.get("clip_radius_m", 3.0)
+            if ex is None or xx is None or cx is None:
+                continue
+
+            entry_dist = _dist(x, z, ex, ez)
+            exit_dist  = _dist(x, z, xx, xz)
+
+            # Enter zone
+            if entry_dist < 20.0 and i not in self._zone_active:
+                self._zone_active.add(i)
+                self._clip_hit.discard(i)
+
+            # Check clip hit while in zone
+            if i in self._zone_active and _dist(x, z, cx, cz) <= radius:
+                self._clip_hit.add(i)
+
+            # Exit zone — fire miss callout if clip was not hit and car was drifting
+            if i in self._zone_active and exit_dist < 15.0:
+                self._zone_active.discard(i)
+                if i not in self._clip_hit and abs(yaw_rate) >= EXIT_YAW_THRESHOLD:
+                    text = CLIP_MISS_CALLOUTS[_clip_miss_index % len(CLIP_MISS_CALLOUTS)]
+                    _clip_miss_index += 1
+                    return text
+
         return None
 
     def check(self, x: float, z: float, speed_kmh: float) -> Optional[str]:

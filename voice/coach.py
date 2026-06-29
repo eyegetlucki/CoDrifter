@@ -96,6 +96,19 @@ class VoiceCoach:
             except queue.Full:
                 pass
 
+    def check_clips(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool, yaw_rate: float = 0.0):
+        if not self.enabled or not self.approach_enabled:
+            return
+        if is_in_pit or not is_engine_running:
+            return
+        text = self._approach.check_clips(x, z, speed_kmh, yaw_rate)
+        if text and self._cooldown.is_allowed("CLIP", is_in_pit, is_engine_running):
+            self._cooldown.record("CLIP")
+            try:
+                self._queue.put_nowait(text)
+            except queue.Full:
+                pass
+
     def check_approach(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
         if not self.enabled or not self.approach_enabled:
             return
