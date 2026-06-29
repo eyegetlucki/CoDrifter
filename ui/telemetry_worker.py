@@ -100,11 +100,11 @@ class TelemetryWorker(QObject):
             )
 
             self._coach.check_approach(
-                frame.normalized_car_position, frame.speed_kmh,
+                frame.world_position_x, frame.world_position_z, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
             )
             self._coach.check_exit(
-                frame.normalized_car_position, frame.speed_kmh,
+                frame.world_position_x, frame.world_position_z, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
                 yaw_rate=frame.yaw_rate,
             )

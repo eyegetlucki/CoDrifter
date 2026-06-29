@@ -1,23 +1,29 @@
 """
-Position-based corner approach warnings.
-Triggers a callout when the car enters the warning window before each corner.
+World-position-based corner approach warnings.
+Uses X/Z coordinates from AC shared memory — no AI spline required.
+Triggers a callout when the car enters the warning bubble before each corner.
 Also exposes is_in_corner() so mistake detection can be suppressed on straights.
 """
 import json
+import math
 import os
 from typing import Optional
 
-CORNER_MAP_PATH      = os.path.join("data", "corner_map.json")
-TRACK_MAPS_DIR       = os.path.join("data", "track_maps")
-_DEFAULT_TRACK_LENGTH_M = 783.413  # Drift Playground 2021 fallback
-WARNING_SECONDS = 2.0
+CORNER_MAP_PATH  = os.path.join("data", "corner_map.json")
+TRACK_MAPS_DIR   = os.path.join("data", "track_maps")
 
-MIN_WARNING_OFFSET = 0.025
-MAX_WARNING_OFFSET = 0.075
+WARNING_SECONDS      = 2.0   # seconds of warning before corner entry
+MIN_WARN_DIST_M      = 20.0  # minimum warning distance in meters
+MAX_WARN_DIST_M      = 60.0  # maximum warning distance in meters
 
-# How far past the corner entry position to consider "in corner" (normalized units)
-CORNER_ACTIVE_WINDOW = 0.02  # ~16m at track length 783m — entry and apex only
-EXIT_YAW_THRESHOLD = 15.0   # deg/s — suppress exit callout if car isn't drifting
+CORNER_ACTIVE_RADIUS_M = 25.0  # "in corner" within this radius of entry point
+CORNER_EXIT_RADIUS_M   = 12.0  # exit callout fires within this radius of exit point
+EXIT_YAW_THRESHOLD     = 15.0  # deg/s — suppress exit callout if not drifting
+
+
+def _dist(x1: float, z1: float, x2: float, z2: float) -> float:
+    return math.sqrt((x1 - x2) ** 2 + (z1 - z2) ** 2)
+
 
 EXIT_CALLOUTS: dict[str, list[str]] = {
     "TIGHT": [
@@ -106,11 +112,6 @@ class CornerApproachDetector:
         self._triggered: set[int] = set()
         self._exit_triggered: set[int] = set()
         self._loaded = False
-        self._track_length_m: float = _DEFAULT_TRACK_LENGTH_M
-
-    def set_track_length(self, meters: float):
-        if meters and meters > 0:
-            self._track_length_m = meters
 
     def load(self, track_slug: str = "") -> bool:
         """Load corner map. Tries active track slug first, falls back to legacy path."""
@@ -128,55 +129,43 @@ class CornerApproachDetector:
         with open(path) as f:
             raw = json.load(f)
 
-        # Support both array format and {name, corners} dict format
-        if isinstance(raw, list):
-            self._corners = raw
-        else:
-            self._corners = raw.get("corners", [])
-            track_length = raw.get("track_length_m")
-            if track_length and track_length > 0:
-                self._track_length_m = float(track_length)
+        corners = raw if isinstance(raw, list) else raw.get("corners", [])
 
-        self._loaded = True
-        print(f"Corner map loaded: {len(self._corners)} corners from {path} "
-              f"(track length: {self._track_length_m:.1f}m)")
-        return True
+        # Only keep corners that have world position data
+        self._corners = [c for c in corners if "x" in c and "z" in c]
+        self._loaded = bool(self._corners)
 
-    def _warning_offset(self, speed_kmh: float) -> float:
+        total = len(corners)
+        usable = len(self._corners)
+        skipped = total - usable
+        note = f" ({skipped} skipped — no x/z data)" if skipped else ""
+        print(f"Corner map loaded: {usable} corners from {path}{note}")
+        return self._loaded
+
+    def _warn_dist(self, speed_kmh: float) -> float:
         speed_ms = speed_kmh / 3.6
-        offset = (speed_ms * WARNING_SECONDS) / self._track_length_m
-        return max(MIN_WARNING_OFFSET, min(MAX_WARNING_OFFSET, offset))
+        return max(MIN_WARN_DIST_M, min(MAX_WARN_DIST_M, speed_ms * WARNING_SECONDS))
 
-    def is_in_corner(self, normalized_pos: float) -> bool:
+    def is_in_corner(self, x: float, z: float) -> bool:
         if not self._loaded:
             return False
         for corner in self._corners:
-            corner_pos = corner["position"]
-            end_pos = (corner_pos + CORNER_ACTIVE_WINDOW) % 1.0
-            if corner_pos < end_pos:
-                if corner_pos <= normalized_pos < end_pos:
-                    return True
-            else:
-                if normalized_pos >= corner_pos or normalized_pos < end_pos:
-                    return True
+            if _dist(x, z, corner["x"], corner["z"]) <= CORNER_ACTIVE_RADIUS_M:
+                return True
         return False
 
-    def check_exit(self, normalized_pos: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
+    def check_exit(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
         if not self._loaded or speed_kmh < 10:
             return None
         if abs(yaw_rate) < EXIT_YAW_THRESHOLD:
             return None
         for i, corner in enumerate(self._corners):
-            exit_pos = corner.get("exit_position")
-            if exit_pos is None:
+            ex = corner.get("exit_x")
+            ez = corner.get("exit_z")
+            if ex is None or ez is None:
                 continue
             corner_type = corner.get("type", "MEDIUM")
-            window_start = exit_pos
-            window_end = (exit_pos + 0.02) % 1.0
-            if window_start < window_end:
-                in_window = window_start <= normalized_pos < window_end
-            else:
-                in_window = normalized_pos >= window_start or normalized_pos < window_end
+            in_window = _dist(x, z, ex, ez) <= CORNER_EXIT_RADIUS_M
             if in_window:
                 if i not in self._exit_triggered:
                     self._exit_triggered.add(i)
@@ -185,22 +174,16 @@ class CornerApproachDetector:
                 self._exit_triggered.discard(i)
         return None
 
-    def check(self, normalized_pos: float, speed_kmh: float) -> Optional[str]:
+    def check(self, x: float, z: float, speed_kmh: float) -> Optional[str]:
         if not self._loaded or speed_kmh < 10:
             return None
 
-        offset = self._warning_offset(speed_kmh)
+        warn_dist = self._warn_dist(speed_kmh)
 
         for i, corner in enumerate(self._corners):
-            corner_pos = corner["position"]
             corner_type = corner.get("type", "MEDIUM")
-            warning_start = (corner_pos - offset) % 1.0
-            warning_end = corner_pos
-
-            if warning_start < warning_end:
-                in_window = warning_start <= normalized_pos < warning_end
-            else:
-                in_window = normalized_pos >= warning_start or normalized_pos < warning_end
+            dist = _dist(x, z, corner["x"], corner["z"])
+            in_window = dist <= warn_dist
 
             if in_window:
                 if i not in self._triggered:

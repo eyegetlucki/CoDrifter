@@ -97,10 +97,10 @@ def _save_track(slug: str, data: dict):
 # ── Mapping signals ───────────────────────────────────────────────────────────
 
 class _MappingSignals(QObject):
-    position_updated = pyqtSignal(float, float)   # normalized_pos, speed_kmh
-    mark_added       = pyqtSignal(int, float)      # count, position
+    position_updated = pyqtSignal(float, float)   # x, speed_kmh
+    mark_added       = pyqtSignal(int, float)      # count, x
     mark_undone      = pyqtSignal(int)             # new count
-    finished         = pyqtSignal(list)            # final list of floats
+    finished         = pyqtSignal(list)            # list of (x, z) tuples
     status           = pyqtSignal(str)
     error            = pyqtSignal(str)
 
@@ -708,15 +708,20 @@ class TracksTab(QWidget):
             combo.currentTextChanged.connect(lambda t, idx=i, s=slug: self._on_type_changed(s, idx, t))
             self._corner_table.setCellWidget(i, 1, combo)
 
-            entry_item = QTableWidgetItem(f"{corner.get('position', 0):.4f}")
+            cx = corner.get("x")
+            cz = corner.get("z")
+            entry_str = f"{cx:.1f}, {cz:.1f}" if cx is not None and cz is not None else "--"
+            entry_item = QTableWidgetItem(entry_str)
             entry_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            entry_item.setForeground(QColor(T.TEXT_PRIMARY))
+            entry_item.setForeground(QColor(T.TEXT_PRIMARY if cx is not None else T.TEXT_DIM))
             self._corner_table.setItem(i, 2, entry_item)
 
-            exit_pos = corner.get("exit_position")
-            exit_item = QTableWidgetItem(f"{exit_pos:.4f}" if exit_pos is not None else "--")
+            ex = corner.get("exit_x")
+            ez = corner.get("exit_z")
+            exit_str = f"{ex:.1f}, {ez:.1f}" if ex is not None and ez is not None else "--"
+            exit_item = QTableWidgetItem(exit_str)
             exit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            exit_item.setForeground(QColor(T.TEXT_SECONDARY if exit_pos is not None else T.TEXT_DIM))
+            exit_item.setForeground(QColor(T.TEXT_SECONDARY if ex is not None else T.TEXT_DIM))
             self._corner_table.setItem(i, 3, exit_item)
 
             del_btn = QPushButton()
@@ -957,12 +962,13 @@ class TracksTab(QWidget):
         label = "entry" if mode == "entries" else "exit"
         sig.status.emit(f"Connected — press {mark_key} at each corner {label}  |  {undo_key} to undo")
 
-        marks: list[float] = []
+        marks: list[tuple] = []  # list of (x, z) tuples
 
         def mark():
-            pos = round(sim.graphics.normalizedCarPosition, 4)
-            marks.append(pos)
-            sig.mark_added.emit(len(marks), pos)
+            coords = sim.physics.carCoordinates
+            x, z = round(float(coords[0]), 2), round(float(coords[2]), 2)
+            marks.append((x, z))
+            sig.mark_added.emit(len(marks), x)  # emit x as preview value
 
         def undo():
             if marks:
@@ -977,15 +983,16 @@ class TracksTab(QWidget):
                 if self._undo_event.is_set():
                     undo()
                     self._undo_event.clear()
-                pos = sim.graphics.normalizedCarPosition
+                coords = sim.physics.carCoordinates
+                x = float(coords[0])
                 speed = sim.physics.speedKmh
-                sig.position_updated.emit(pos, speed)
+                sig.position_updated.emit(x, speed)
                 time.sleep(1 / 30)
         finally:
             keyboard.unhook_all()
             sim.close()
 
-        sig.finished.emit(list(marks))
+        sig.finished.emit(marks)
 
     def _finish_mapping(self):
         self._mapping_stop.set()
@@ -994,14 +1001,14 @@ class TracksTab(QWidget):
         self._undo_event.set()
 
     @pyqtSlot(float, float)
-    def _on_mapping_pos(self, pos: float, speed: float):
+    def _on_mapping_pos(self, x: float, speed: float):
         if self._mapping_pos_lbl:
-            self._mapping_pos_lbl.setText(f"Position: {pos:.4f}  |  Speed: {speed:.1f} km/h")
+            self._mapping_pos_lbl.setText(f"X: {x:.1f}  |  Speed: {speed:.1f} km/h")
 
     @pyqtSlot(int, float)
-    def _on_mark_added(self, count: int, pos: float):
+    def _on_mark_added(self, count: int, x: float):
         if self._mapping_marks_lbl:
-            self._mapping_marks_lbl.setText(f"Marks: {count}  (last: {pos:.4f})")
+            self._mapping_marks_lbl.setText(f"Marks: {count}  (last X: {x:.1f})")
 
     @pyqtSlot(int)
     def _on_mark_undone(self, count: int):
@@ -1016,13 +1023,14 @@ class TracksTab(QWidget):
 
         if mode == "entries":
             data["corners"] = [
-                {"corner": i + 1, "position": pos, "type": "MEDIUM"}
-                for i, pos in enumerate(positions)
+                {"corner": i + 1, "x": xz[0], "z": xz[1], "type": "MEDIUM"}
+                for i, xz in enumerate(positions)
             ]
         else:
-            for i, pos in enumerate(positions):
+            for i, xz in enumerate(positions):
                 if i < len(data.get("corners", [])):
-                    data["corners"][i]["exit_position"] = pos
+                    data["corners"][i]["exit_x"] = xz[0]
+                    data["corners"][i]["exit_z"] = xz[1]
 
         _save_track(slug, data)
 

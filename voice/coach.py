@@ -31,10 +31,8 @@ class VoiceCoach:
             "LOSING_ANGLE": True, "SPEED_LOSS": True, "SNAP_RISK": True,
         }
 
-    def load_corner_map(self, track_slug: str = "", track_length_m: float | None = None):
+    def load_corner_map(self, track_slug: str = ""):
         self._approach.load(track_slug)
-        if track_length_m is not None:
-            self._approach.set_track_length(track_length_m)
 
     def update_settings(self, same_mistake_cooldown: float, any_callout_cooldown: float,
                         approach_enabled: bool, enabled_mistakes: dict):
@@ -82,15 +80,15 @@ class VoiceCoach:
         except queue.Full:
             pass
 
-    def is_in_corner(self, normalized_pos: float) -> bool:
-        return self._approach.is_in_corner(normalized_pos)
+    def is_in_corner(self, x: float, z: float) -> bool:
+        return self._approach.is_in_corner(x, z)
 
-    def check_exit(self, normalized_pos: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool, yaw_rate: float = 0.0):
+    def check_exit(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool, yaw_rate: float = 0.0):
         if not self.enabled or not self.approach_enabled:
             return
         if is_in_pit or not is_engine_running:
             return
-        text = self._approach.check_exit(normalized_pos, speed_kmh, yaw_rate)
+        text = self._approach.check_exit(x, z, speed_kmh, yaw_rate)
         if text and self._cooldown.is_allowed("EXIT", is_in_pit, is_engine_running):
             self._cooldown.record("EXIT")
             try:
@@ -98,12 +96,12 @@ class VoiceCoach:
             except queue.Full:
                 pass
 
-    def check_approach(self, normalized_pos: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
+    def check_approach(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
         if not self.enabled or not self.approach_enabled:
             return
         if is_in_pit or not is_engine_running:
             return
-        text = self._approach.check(normalized_pos, speed_kmh)
+        text = self._approach.check(x, z, speed_kmh)
         if text and self._cooldown.is_allowed("APPROACH", is_in_pit, is_engine_running):
             self._cooldown.record("APPROACH")
             try:
