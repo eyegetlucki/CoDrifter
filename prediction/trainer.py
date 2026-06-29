@@ -51,7 +51,14 @@ def train():
         print(f"  {MISTAKE_CLASSES[idx]}: {count} frames ({count/len(labels)*100:.1f}%)")
 
     X = features.values
-    y = labels.values
+    y_raw = labels.values
+
+    # Remap to contiguous class indices (handles sparse class presence, e.g. only CLEAN + SNAP_RISK)
+    present_classes = sorted(np.unique(y_raw).tolist())
+    remap = {old: new for new, old in enumerate(present_classes)}
+    class_names = [MISTAKE_CLASSES[i] for i in present_classes]
+    y = np.array([remap[v] for v in y_raw])
+    print(f"  Classes in training data: {class_names}")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
@@ -64,23 +71,30 @@ def train():
     sample_weights = np.array([np.sqrt(max_count / class_counts[label]) for label in y_train])
 
     print(f"\nTraining XGBoost on {len(X_train)} samples...")
-    model = XGBClassifier(
+    n_classes = len(class_names)
+    xgb_params = dict(
         n_estimators=100,
         max_depth=5,
         learning_rate=0.1,
         subsample=0.8,
         colsample_bytree=0.8,
         use_label_encoder=False,
-        eval_metric="mlogloss",
         n_jobs=-1,
         random_state=42,
-        objective="multi:softprob",
     )
+    if n_classes == 2:
+        xgb_params["objective"] = "binary:logistic"
+        xgb_params["eval_metric"] = "logloss"
+    else:
+        xgb_params["objective"] = "multi:softprob"
+        xgb_params["num_class"] = n_classes
+        xgb_params["eval_metric"] = "mlogloss"
+    model = XGBClassifier(**xgb_params)
     model.fit(X_train, y_train, sample_weight=sample_weights)
 
     print("\nEvaluating on test set...")
     y_pred = model.predict(X_test)
-    print(classification_report(y_test, y_pred, target_names=MISTAKE_CLASSES, zero_division=0))
+    print(classification_report(y_test, y_pred, target_names=class_names, zero_division=0))
 
     # Inference speed check
     sample = X_test[:1]
@@ -95,7 +109,7 @@ def train():
 
     os.makedirs("models", exist_ok=True)
     with open(MODEL_PATH, "wb") as f:
-        pickle.dump(model, f)
+        pickle.dump({"model": model, "class_names": class_names}, f)
     print(f"\nModel saved to: {os.path.abspath(MODEL_PATH)}")
 
 

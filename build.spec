@@ -11,11 +11,12 @@ elevenlabs_datas,  elevenlabs_bins,  elevenlabs_hidden  = collect_all("elevenlab
 anthropic_datas,   anthropic_bins,   anthropic_hidden   = collect_all("anthropic")
 xgboost_datas,     xgboost_bins,     xgboost_hidden     = collect_all("xgboost")
 sklearn_hidden = collect_submodules("sklearn")
+scipy_datas,       scipy_bins,       scipy_hidden       = collect_all("scipy")
 
 a = Analysis(
     ["app.py"],
     pathex=["."],
-    binaries=elevenlabs_bins + anthropic_bins + xgboost_bins,
+    binaries=elevenlabs_bins + anthropic_bins + xgboost_bins + scipy_bins,
     datas=[
         # App assets — land next to the exe (root of dist/CoDrifter/)
         ("driftline.ico",           "."),
@@ -27,6 +28,7 @@ a = Analysis(
         *elevenlabs_datas,
         *anthropic_datas,
         *xgboost_datas,
+        *scipy_datas,
     ],
     hiddenimports=[
         # Qt
@@ -37,6 +39,7 @@ a = Analysis(
         # ML
         *xgboost_hidden,
         *sklearn_hidden,
+        *scipy_hidden,
         "sklearn.neighbors._partition_nodes",
         # Voice / API
         *elevenlabs_hidden,

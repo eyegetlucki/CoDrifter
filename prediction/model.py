@@ -23,6 +23,7 @@ class MistakePrediction:
 class MistakePredictor:
     def __init__(self, confidence_threshold: float = CONFIDENCE_THRESHOLD):
         self._model = None
+        self._class_names: list[str] = []
         self._threshold = confidence_threshold
         self._history: deque[str] = deque(maxlen=HYSTERESIS_FRAMES)
 
@@ -35,8 +36,15 @@ class MistakePredictor:
                 f"Model not found at {MODEL_PATH}. Run: python -m prediction.trainer"
             )
         with open(MODEL_PATH, "rb") as f:
-            self._model = pickle.load(f)
-        print(f"Model loaded from {MODEL_PATH}")
+            payload = pickle.load(f)
+        if isinstance(payload, dict):
+            self._model = payload["model"]
+            self._class_names: list[str] = payload["class_names"]
+        else:
+            # Legacy pickle — raw model, assume full MISTAKE_CLASSES order
+            self._model = payload
+            self._class_names = list(INT_TO_CLASS[i] for i in range(len(INT_TO_CLASS)))
+        print(f"Model loaded from {MODEL_PATH} (classes: {self._class_names})")
 
     def predict(self, feature_vector: list, speed_kmh: float = 0.0) -> Optional[MistakePrediction]:
         if self._model is None:
@@ -49,7 +57,7 @@ class MistakePredictor:
         proba = self._model.predict_proba([feature_vector])[0]
         class_idx = int(proba.argmax())
         confidence = float(proba[class_idx])
-        mistake_type = INT_TO_CLASS[class_idx]
+        mistake_type = self._class_names[class_idx] if self._class_names else INT_TO_CLASS.get(class_idx, "CLEAN")
 
         if mistake_type == "CLEAN" or confidence < self._threshold:
             self._history.clear()
