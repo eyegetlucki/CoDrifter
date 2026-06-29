@@ -27,11 +27,13 @@ class VoiceCoach:
         self._thread.start()
         self.enabled: bool = enabled
         self.approach_enabled: bool = approach_enabled
+        self._track_slug: str = ""
         self.enabled_mistakes: dict = enabled_mistakes or {
             "LOSING_ANGLE": True, "SPEED_LOSS": True, "SNAP_RISK": True,
         }
 
     def load_corner_map(self, track_slug: str = ""):
+        self._track_slug = track_slug
         self._approach.load(track_slug)
 
     def update_settings(self, same_mistake_cooldown: float, any_callout_cooldown: float,
@@ -109,12 +111,12 @@ class VoiceCoach:
             except queue.Full:
                 pass
 
-    def check_approach(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool):
+    def check_approach(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool, yaw_rate: float = 0.0):
         if not self.enabled or not self.approach_enabled:
             return
         if is_in_pit or not is_engine_running:
             return
-        text = self._approach.check(x, z, speed_kmh)
+        text = self._approach.check(x, z, speed_kmh, yaw_rate)
         if text and self._cooldown.is_allowed("APPROACH", is_in_pit, is_engine_running):
             self._cooldown.record("APPROACH")
             try:
@@ -123,5 +125,6 @@ class VoiceCoach:
                 pass
 
     def stop(self):
+        self._approach.save_learning(self._track_slug)
         self._queue.put(None)
         self._thread.join(timeout=5)

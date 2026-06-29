@@ -102,6 +102,7 @@ class TelemetryWorker(QObject):
             self._coach.check_approach(
                 frame.world_position_x, frame.world_position_z, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
+                yaw_rate=frame.yaw_rate,
             )
             self._coach.check_clips(
                 frame.world_position_x, frame.world_position_z, frame.speed_kmh,

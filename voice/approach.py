@@ -2,15 +2,18 @@
 World-position-based corner approach warnings.
 Uses X/Z coordinates from AC shared memory — no AI spline required.
 Triggers a callout when the car enters the warning bubble before each corner.
-Also exposes is_in_corner() so mistake detection can be suppressed on straights.
+Context-aware: reads speed and yaw_rate at entry to diagnose the approach.
+Learned per-corner approach speeds are persisted per track across sessions.
 """
 import json
 import math
 import os
+import random
 from typing import Optional
 
 CORNER_MAP_PATH  = os.path.join("data", "corner_map.json")
 TRACK_MAPS_DIR   = os.path.join("data", "track_maps")
+TRACK_LEARNING_DIR = os.path.join("data", "track_learning")
 
 WARNING_SECONDS      = 2.0   # seconds of warning before corner entry
 MIN_WARN_DIST_M      = 20.0  # minimum warning distance in meters
@@ -19,6 +22,12 @@ MAX_WARN_DIST_M      = 60.0  # maximum warning distance in meters
 CORNER_ACTIVE_RADIUS_M = 25.0  # "in corner" within this radius of entry point
 CORNER_EXIT_RADIUS_M   = 12.0  # exit callout fires within this radius of exit point
 EXIT_YAW_THRESHOLD     = 15.0  # deg/s — suppress exit callout if not drifting
+
+# Context-aware approach thresholds
+YAW_INITIATED_THRESHOLD = 10.0   # deg/s — below this = car still pointed forward
+HOT_MULTIPLIER          = 1.15   # 15% above personal average = hot entry
+MIN_PASSES_FOR_SPEED_CTX = 3     # passes needed before speed context activates
+MAX_SPEED_HISTORY       = 20     # max passes stored per corner
 
 
 def _dist(x1: float, z1: float, x2: float, z2: float) -> float:
@@ -86,16 +95,26 @@ CALLOUTS: dict[str, list[str]] = {
     ],
 }
 
-_callout_index: dict[int, int] = {}
+# Context-aware approach callouts (picked randomly within each bucket)
+CONTEXT_CALLOUTS = {
+    "hot_no_angle": [
+        "Too fast and too straight — brake and initiate",
+        "Way too hot and upright — scrub speed and get sideways",
+        "Hot and not rotating — brake now, then flick",
+    ],
+    "hot_has_angle": [
+        "Hot into this one — scrub a bit more speed",
+        "Good angle but too fast — ease off slightly",
+        "You're sideways but carrying too much — back off a touch",
+    ],
+    "speed_ok_no_angle": [
+        "Get sideways now — initiate before the corner",
+        "Speed's fine but you're too straight — flick it",
+        "Good speed — just need the rotation now",
+    ],
+}
+
 _exit_index: dict[int, int] = {}
-
-
-def _get_callout(corner_idx: int, corner_type: str) -> str:
-    options = CALLOUTS.get(corner_type, CALLOUTS["MEDIUM"])
-    idx = _callout_index.get(corner_idx, 0)
-    text = options[idx % len(options)]
-    _callout_index[corner_idx] = idx + 1
-    return text
 
 
 def _get_exit_callout(corner_idx: int, corner_type: str) -> str:
@@ -120,12 +139,14 @@ class CornerApproachDetector:
         self._clip_zones: list[dict] = []
         self._triggered: set[int] = set()
         self._exit_triggered: set[int] = set()
-        self._zone_active: set[int] = set()    # currently inside a judged zone
-        self._clip_hit: set[int] = set()       # clipped this zone this pass
+        self._zone_active: set[int] = set()
+        self._clip_hit: set[int] = set()
+        self._approach_speeds: dict[int, list[float]] = {}  # corner_idx -> [speed, ...]
+        self._track_slug: str = ""
         self._loaded = False
 
     def load(self, track_slug: str = "") -> bool:
-        """Load corner map. Tries active track slug first, falls back to legacy path."""
+        self._track_slug = track_slug
         path = None
         if track_slug:
             candidate = os.path.join(TRACK_MAPS_DIR, f"{track_slug}.json")
@@ -142,8 +163,6 @@ class CornerApproachDetector:
 
         corners = raw if isinstance(raw, list) else raw.get("corners", [])
         self._clip_zones = raw.get("clip_zones", []) if isinstance(raw, dict) else []
-
-        # Only keep corners that have world position data
         self._corners = [c for c in corners if "x" in c and "z" in c]
         self._loaded = bool(self._corners) or bool(self._clip_zones)
 
@@ -152,11 +171,75 @@ class CornerApproachDetector:
         skipped = total - usable
         note = f" ({skipped} skipped — no x/z data)" if skipped else ""
         print(f"Corner map loaded: {usable} corners from {path}{note}")
+
+        self._load_learning(track_slug)
         return self._loaded
+
+    def _load_learning(self, track_slug: str):
+        if not track_slug:
+            return
+        path = os.path.join(TRACK_LEARNING_DIR, f"{track_slug}.json")
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            raw_speeds = data.get("corner_approach_speeds", {})
+            self._approach_speeds = {int(k): v for k, v in raw_speeds.items()}
+            print(f"Track learning loaded: {len(self._approach_speeds)} corners from {path}")
+        except Exception as e:
+            print(f"[approach] Could not load track learning: {e}")
+
+    def save_learning(self, track_slug: str = ""):
+        slug = track_slug or self._track_slug
+        if not slug or not self._approach_speeds:
+            return
+        os.makedirs(TRACK_LEARNING_DIR, exist_ok=True)
+        path = os.path.join(TRACK_LEARNING_DIR, f"{slug}.json")
+        data = {"corner_approach_speeds": {str(k): v for k, v in self._approach_speeds.items()}}
+        try:
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"Track learning saved: {path}")
+        except Exception as e:
+            print(f"[approach] Could not save track learning: {e}")
 
     def _warn_dist(self, speed_kmh: float) -> float:
         speed_ms = speed_kmh / 3.6
         return max(MIN_WARN_DIST_M, min(MAX_WARN_DIST_M, speed_ms * WARNING_SECONDS))
+
+    def _avg_approach_speed(self, corner_idx: int) -> Optional[float]:
+        history = self._approach_speeds.get(corner_idx, [])
+        if len(history) < MIN_PASSES_FOR_SPEED_CTX:
+            return None
+        return sum(history) / len(history)
+
+    def _record_approach_speed(self, corner_idx: int, speed_kmh: float):
+        history = self._approach_speeds.setdefault(corner_idx, [])
+        history.append(speed_kmh)
+        if len(history) > MAX_SPEED_HISTORY:
+            self._approach_speeds[corner_idx] = history[-MAX_SPEED_HISTORY:]
+
+    def _context_callout(self, corner_idx: int, corner_type: str, speed_kmh: float, yaw_rate: float) -> str:
+        avg = self._avg_approach_speed(corner_idx)
+        initiated = abs(yaw_rate) >= YAW_INITIATED_THRESHOLD
+
+        if avg is not None:
+            hot = speed_kmh > avg * HOT_MULTIPLIER
+            if hot and not initiated:
+                return random.choice(CONTEXT_CALLOUTS["hot_no_angle"])
+            if hot and initiated:
+                return random.choice(CONTEXT_CALLOUTS["hot_has_angle"])
+            if not hot and not initiated:
+                return random.choice(CONTEXT_CALLOUTS["speed_ok_no_angle"])
+            # Good speed + good angle — use the standard corner type callout
+        elif not initiated:
+            # No speed history yet but car is clearly not initiated
+            return random.choice(CONTEXT_CALLOUTS["speed_ok_no_angle"])
+
+        # Default: good approach or not enough data — type-specific callout
+        options = CALLOUTS.get(corner_type, CALLOUTS["MEDIUM"])
+        return random.choice(options)
 
     def is_in_corner(self, x: float, z: float) -> bool:
         if not self._loaded:
@@ -187,7 +270,6 @@ class CornerApproachDetector:
         return None
 
     def check_clips(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
-        """Check clip zones — fires a miss callout when exiting a zone without hitting the clip."""
         global _clip_miss_index
         if not self._clip_zones or speed_kmh < 10:
             return None
@@ -205,16 +287,13 @@ class CornerApproachDetector:
             entry_dist = _dist(x, z, ex, ez)
             exit_dist  = _dist(x, z, xx, xz)
 
-            # Enter zone
             if entry_dist < 20.0 and i not in self._zone_active:
                 self._zone_active.add(i)
                 self._clip_hit.discard(i)
 
-            # Check clip hit while in zone
             if i in self._zone_active and _dist(x, z, cx, cz) <= radius:
                 self._clip_hit.add(i)
 
-            # Exit zone — fire miss callout if clip was not hit and car was drifting
             if i in self._zone_active and exit_dist < 15.0:
                 self._zone_active.discard(i)
                 if i not in self._clip_hit and abs(yaw_rate) >= EXIT_YAW_THRESHOLD:
@@ -224,7 +303,7 @@ class CornerApproachDetector:
 
         return None
 
-    def check(self, x: float, z: float, speed_kmh: float) -> Optional[str]:
+    def check(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
         if not self._loaded or speed_kmh < 10:
             return None
 
@@ -238,7 +317,8 @@ class CornerApproachDetector:
             if in_window:
                 if i not in self._triggered:
                     self._triggered.add(i)
-                    return _get_callout(i, corner_type)
+                    self._record_approach_speed(i, speed_kmh)
+                    return self._context_callout(i, corner_type, speed_kmh, yaw_rate)
             else:
                 self._triggered.discard(i)
 

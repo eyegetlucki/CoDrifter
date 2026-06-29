@@ -8,9 +8,12 @@ MISTAKE_CLASSES = ["CLEAN", "LOSING_ANGLE", "SPEED_LOSS", "SNAP_RISK"]
 CLASS_TO_INT = {c: i for i, c in enumerate(MISTAKE_CLASSES)}
 INT_TO_CLASS = {i: c for i, c in enumerate(MISTAKE_CLASSES)}
 
-CORNER_MAP_PATH  = os.path.join("data", "corner_map.json")
-TRACK_MAPS_DIR   = os.path.join("data", "track_maps")
-CORNER_ACTIVE_RADIUS_M = 25.0  # matches approach.py
+CORNER_MAP_PATH    = os.path.join("data", "corner_map.json")
+TRACK_MAPS_DIR     = os.path.join("data", "track_maps")
+TRACK_LEARNING_DIR = os.path.join("data", "track_learning")
+CORNER_ACTIVE_RADIUS_M  = 25.0   # matches approach.py
+HOT_ENTRY_RADIUS_M      = 37.5   # 1.5x CORNER_ACTIVE_RADIUS_M — approach zone
+HOT_MULTIPLIER          = 1.15   # matches approach.py
 
 # LOSING_ANGLE — yaw rate dropping while in corner (car straightening unintentionally)
 LOSING_ANGLE_YAW_DROP = -0.3      # yaw rate delta over window (rad/s per 0.5s)
@@ -28,6 +31,26 @@ SPEED_LOSS_MIN_SPEED = 20.0
 SNAP_RISK_YAW_STD = 0.25          # erratic yaw = about to spin
 SNAP_RISK_MIN_LATERAL = 3.0       # actually sideways
 SNAP_RISK_MIN_SPEED = 20.0
+
+
+def _load_corner_learning() -> dict[int, float]:
+    """Load per-corner average approach speeds from the most recent track learning file."""
+    if not os.path.isdir(TRACK_LEARNING_DIR):
+        return {}
+    result: dict[int, float] = {}
+    for fname in os.listdir(TRACK_LEARNING_DIR):
+        if not fname.endswith(".json"):
+            continue
+        path = os.path.join(TRACK_LEARNING_DIR, fname)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            for k, speeds in data.get("corner_approach_speeds", {}).items():
+                if len(speeds) >= 3:
+                    result[int(k)] = sum(speeds) / len(speeds)
+        except Exception:
+            pass
+    return result
 
 
 def _load_corner_xz() -> list[tuple[float, float]]:
@@ -75,6 +98,7 @@ def label_frame(
     is_in_pit: bool,
     is_engine_running: bool,
     corner_xz: list[tuple[float, float]],
+    hot_entry: bool = False,
 ) -> str:
     if is_in_pit or not is_engine_running or speed < 5.0:
         return "CLEAN"
@@ -105,10 +129,27 @@ def label_frame(
     return "CLEAN"
 
 
+def _compute_hot_entry(world_x: float, world_z: float, speed: float,
+                        corner_xz: list[tuple[float, float]],
+                        corner_avgs: dict[int, float]) -> bool:
+    """True if the car is in the approach zone of a corner and moving faster than personal average."""
+    for idx, (cx, cz) in enumerate(corner_xz):
+        d = math.sqrt((world_x - cx) ** 2 + (world_z - cz) ** 2)
+        if d <= HOT_ENTRY_RADIUS_M and d > CORNER_ACTIVE_RADIUS_M:
+            avg = corner_avgs.get(idx)
+            if avg is not None and speed > avg * HOT_MULTIPLIER:
+                return True
+    return False
+
+
 def label_dataframe(df: pd.DataFrame, features_df: pd.DataFrame) -> pd.Series:
     corner_xz = _load_corner_xz()
     if not corner_xz:
         print("  Warning: no corner X/Z data found — LOSING_ANGLE and SPEED_LOSS will not be labeled")
+
+    corner_avgs = _load_corner_learning()
+    if corner_avgs:
+        print(f"  Track learning loaded: {len(corner_avgs)} corner speed averages")
 
     labels = []
     feat_rows = features_df.reset_index(drop=True)
@@ -120,6 +161,9 @@ def label_dataframe(df: pd.DataFrame, features_df: pd.DataFrame) -> pd.Series:
     for i in range(len(feat_rows)):
         fr = feat_rows.iloc[i]
         rr = raw_rows.iloc[i]
+        wx = float(rr.get("world_position_x", 0.0))
+        wz = float(rr.get("world_position_z", 0.0))
+        hot_entry = _compute_hot_entry(wx, wz, fr["speed_kmh"], corner_xz, corner_avgs)
         label = label_frame(
             speed=fr["speed_kmh"],
             throttle=fr["throttle"],
@@ -130,11 +174,12 @@ def label_dataframe(df: pd.DataFrame, features_df: pd.DataFrame) -> pd.Series:
             yaw_rate_delta=yaw_delta.iloc[i],
             speed_delta=fr["speed_delta"],
             rear_slip_mean=fr["rear_slip_mean"],
-            world_x=float(rr.get("world_position_x", 0.0)),
-            world_z=float(rr.get("world_position_z", 0.0)),
+            world_x=wx,
+            world_z=wz,
             is_in_pit=bool(rr["is_in_pit"]),
             is_engine_running=bool(rr["is_engine_running"]),
             corner_xz=corner_xz,
+            hot_entry=hot_entry,
         )
         labels.append(CLASS_TO_INT[label])
 
