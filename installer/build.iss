@@ -8,7 +8,7 @@
 ; Output: installer\CoDrifter_Setup.exe
 
 #define AppName      "CoDrifter"
-#define AppVersion   "1.0.4"
+#define AppVersion   "1.0.5"
 #define AppPublisher "Laitrell Uy-Xayachak"
 #define AppURL       "https://github.com/eyegetlucki/CoDrifter"
 #define AppExeName   "CoDrifter.exe"
