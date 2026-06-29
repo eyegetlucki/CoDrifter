@@ -965,7 +965,7 @@ class TracksTab(QWidget):
         marks: list[tuple] = []  # list of (x, z) tuples
 
         def mark():
-            coords = sim.physics.carCoordinates
+            coords = sim.graphics.carCoordinates
             x, z = round(float(coords[0]), 2), round(float(coords[2]), 2)
             marks.append((x, z))
             sig.mark_added.emit(len(marks), x)  # emit x as preview value
@@ -983,7 +983,7 @@ class TracksTab(QWidget):
                 if self._undo_event.is_set():
                     undo()
                     self._undo_event.clear()
-                coords = sim.physics.carCoordinates
+                coords = sim.graphics.carCoordinates
                 x = float(coords[0])
                 speed = sim.physics.speedKmh
                 sig.position_updated.emit(x, speed)
