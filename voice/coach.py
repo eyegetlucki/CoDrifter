@@ -1,9 +1,10 @@
 import os
 import threading
 import queue
+import numpy as np
+import sounddevice as sd
 from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
-from elevenlabs import play
 
 from voice.callouts import get_callout
 from voice.cooldown import CooldownManager
@@ -43,13 +44,15 @@ class VoiceCoach:
         self.enabled_mistakes = enabled_mistakes
 
     def _speak(self, text: str):
-        audio = self._client.text_to_speech.convert(
+        audio_bytes = b"".join(self._client.text_to_speech.convert(
             voice_id=VOICE_ID,
             text=text,
             model_id=MODEL_ID,
-            output_format="mp3_44100_128",
-        )
-        play(audio)
+            output_format="pcm_44100",
+        ))
+        audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        sd.play(audio_array, samplerate=44100)
+        sd.wait()
 
     def _worker(self):
         while True:
