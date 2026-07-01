@@ -15,9 +15,12 @@ CORNER_ACTIVE_RADIUS_M  = 25.0   # matches approach.py
 HOT_ENTRY_RADIUS_M      = 37.5   # 1.5x CORNER_ACTIVE_RADIUS_M — approach zone
 HOT_MULTIPLIER          = 1.15   # matches approach.py
 
-# LOSING_ANGLE — yaw rate dropping while in corner (car straightening unintentionally)
-LOSING_ANGLE_YAW_DROP = -0.3      # yaw rate delta over window (rad/s per 0.5s)
-LOSING_ANGLE_MIN_YAW = 0.15       # must have been rotating meaningfully
+# LOSING_ANGLE — |yaw| shrinking while in corner (car straightening unintentionally).
+# Direction-aware: (yaw * yaw_delta) < 0 means the rotation magnitude is decreasing,
+# regardless of which way the car is drifting. Calibrated from 200k Klutch frames —
+# real in-corner yaw acceleration peaks ~0.09/frame, so the old -0.3 threshold was dead.
+LOSING_ANGLE_YAW_ACCEL = 0.06     # |yaw_delta| per frame — shrinking fast enough to be unintentional
+LOSING_ANGLE_MIN_YAW = 0.4        # must have been rotating meaningfully (raised from 0.15)
 LOSING_ANGLE_THROTTLE_MAX = 0.5   # not on full throttle (that's intentional lift)
 LOSING_ANGLE_MIN_SPEED = 15.0
 
@@ -30,11 +33,13 @@ SPEED_LOSS_MIN_SPEED = 20.0
 # SNAP_RISK — rotation accelerating in the direction it's already turning = losing it.
 # A controlled drift HOLDS a high yaw rate steadily; a snap has |yaw| growing fast.
 # The same-sign (growing) gate is what separates a real snap from an aggressive-but-held slide.
-SNAP_RISK_YAW_STD     = 0.30      # erratic yaw (raised from 0.25 — normal drift is fairly erratic)
+# Calibrated from 200k Klutch frames: drifting abs_yaw p90=1.41, so MIN_ABS_YAW=1.2 only
+# fires when rotation is already near the high end. Old 0.45 sat below the median (0.74).
+SNAP_RISK_YAW_STD     = 0.40      # erratic yaw (p90 of drifting is 0.35)
 SNAP_RISK_MIN_LATERAL = 3.0       # actually sideways
 SNAP_RISK_MIN_SPEED   = 20.0
-SNAP_RISK_MIN_ABS_YAW = 0.45      # rad/s — meaningful rotation already underway
-SNAP_RISK_YAW_ACCEL   = 0.05      # rad/s per frame — rotation diverging fast, not being held
+SNAP_RISK_MIN_ABS_YAW = 1.2       # rad/s — rotation already near the high end of drifting
+SNAP_RISK_YAW_ACCEL   = 0.07      # rad/s per frame — rotation diverging fast, not being held
 
 
 def _load_corner_learning() -> dict[int, float]:
@@ -57,18 +62,26 @@ def _load_corner_learning() -> dict[int, float]:
     return result
 
 
+def _is_real_corner(c: dict) -> bool:
+    """A corner needs real world coords. (0,0) is legacy garbage from the
+    normalized-position era — those maps were never remapped to world X/Z."""
+    if "x" not in c or "z" not in c:
+        return False
+    return not (abs(c["x"]) < 0.01 and abs(c["z"]) < 0.01)
+
+
 def _load_corner_xz() -> list[tuple[float, float]]:
     """Load corner X/Z positions from the active track map or legacy corner map."""
     # Try track maps dir first (newest format)
     if os.path.isdir(TRACK_MAPS_DIR):
-        for fname in os.listdir(TRACK_MAPS_DIR):
+        for fname in sorted(os.listdir(TRACK_MAPS_DIR)):
             if not fname.endswith(".json"):
                 continue
             path = os.path.join(TRACK_MAPS_DIR, fname)
             with open(path) as f:
                 raw = json.load(f)
             corners = raw.get("corners", []) if isinstance(raw, dict) else raw
-            xz = [(c["x"], c["z"]) for c in corners if "x" in c and "z" in c]
+            xz = [(c["x"], c["z"]) for c in corners if _is_real_corner(c)]
             if xz:
                 return xz
     # Fall back to legacy corner_map.json
@@ -76,7 +89,7 @@ def _load_corner_xz() -> list[tuple[float, float]]:
         with open(CORNER_MAP_PATH) as f:
             data = json.load(f)
         if isinstance(data, list):
-            return [(c["x"], c["z"]) for c in data if "x" in c and "z" in c]
+            return [(c["x"], c["z"]) for c in data if _is_real_corner(c)]
     return []
 
 
@@ -123,8 +136,12 @@ def label_frame(
         return "SNAP_RISK"
 
     if in_corner:
-        # LOSING_ANGLE — yaw rate decaying, car straightening unintentionally
-        if (yaw_rate_delta < LOSING_ANGLE_YAW_DROP
+        # LOSING_ANGLE — |yaw| shrinking, car straightening unintentionally.
+        # (yaw_rate * yaw_rate_delta) < 0 means rotation magnitude is dropping (either
+        # drift direction), and abs() > accel means it's dropping fast enough to be a mistake.
+        yaw_shrinking = (yaw_rate * yaw_rate_delta) < 0
+        if (yaw_shrinking
+                and abs(yaw_rate_delta) > LOSING_ANGLE_YAW_ACCEL
                 and abs(yaw_rate_mean) > LOSING_ANGLE_MIN_YAW
                 and throttle < LOSING_ANGLE_THROTTLE_MAX
                 and speed > LOSING_ANGLE_MIN_SPEED):

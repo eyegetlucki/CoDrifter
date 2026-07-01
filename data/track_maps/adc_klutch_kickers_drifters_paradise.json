@@ -1,5 +1,78 @@
 {
   "name": "ADC Klutch Kickers - Drifters Paradise",
   "track_length_m": 581.7,
-  "corners": []
+  "corners": [
+    {
+      "corner": 1,
+      "x": 109.08,
+      "z": 61.13,
+      "type": "SWEEPING",
+      "exit_x": 109.77,
+      "exit_z": 10.66
+    },
+    {
+      "corner": 2,
+      "x": 78.94,
+      "z": 10.53,
+      "type": "TIGHT",
+      "exit_x": 59.39,
+      "exit_z": 3.07
+    },
+    {
+      "corner": 3,
+      "x": 52.57,
+      "z": -13.12,
+      "type": "MEDIUM",
+      "exit_x": 24.54,
+      "exit_z": 13.86
+    },
+    {
+      "corner": 4,
+      "x": 54.34,
+      "z": 25.41,
+      "type": "MEDIUM",
+      "exit_x": 31.31,
+      "exit_z": 50.16
+    },
+    {
+      "corner": 5,
+      "x": 20.09,
+      "z": 39.0,
+      "type": "MEDIUM",
+      "exit_x": -3.42,
+      "exit_z": 76.03
+    }
+  ],
+  "clip_zones": [
+    {
+      "zone": 2,
+      "zone_entry_x": 68.92,
+      "zone_entry_z": 14.76,
+      "clip_x": null,
+      "clip_z": null,
+      "zone_exit_x": 59.51,
+      "zone_exit_z": 9.33,
+      "clip_radius_m": 3.0
+    },
+    {
+      "zone": 3,
+      "zone_entry_x": 36.79,
+      "zone_entry_z": -25.59,
+      "clip_x": null,
+      "clip_z": null,
+      "zone_exit_x": 22.41,
+      "zone_exit_z": 13.48,
+      "clip_radius_m": 3.0
+    },
+    {
+      "zone": 4,
+      "zone_entry_x": 63.19,
+      "zone_entry_z": 29.9,
+      "clip_x": null,
+      "clip_z": null,
+      "zone_exit_x": 35.42,
+      "zone_exit_z": 58.15,
+      "clip_radius_m": 3.0
+    }
+  ]
 }
