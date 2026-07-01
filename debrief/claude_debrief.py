@@ -18,7 +18,7 @@ MISTAKE_CLASSES = ["LOSING_ANGLE", "SPEED_LOSS", "SNAP_RISK"]
 MISTAKE_LABELS = {
     "LOSING_ANGLE": "losing drift angle",
     "SPEED_LOSS": "scrubbing off too much speed",
-    "SNAP_RISK": "close to spinning out",
+    "SNAP_RISK": "about to lose the rear",
 }
 
 
@@ -255,7 +255,7 @@ SESSION TELEMETRY SUMMARY:
 - Detected mistake events:
   - Losing drift angle (car straightening out mid-corner): {summary['mistake_events']['LOSING_ANGLE']}
   - Scrubbing off too much speed: {summary['mistake_events']['SPEED_LOSS']}
-  - Close to spinning out (car on the edge of control): {summary['mistake_events']['SNAP_RISK']}{per_corner_block}
+  - About to lose the rear (rotation running away faster than it's being caught): {summary['mistake_events']['SNAP_RISK']}{per_corner_block}
 {prev_block}
 Return ONLY valid JSON — no markdown, no explanation, no prefix text. Schema:
 {{
@@ -291,8 +291,9 @@ IMPORTANT — write for a beginner who does not know racing jargon. In every tex
 (improvements, coaching_tip, vs_previous_session) use plain, everyday language. NEVER write
 the internal codes "LOSING_ANGLE", "SPEED_LOSS", or "SNAP_RISK". Describe them in plain words:
 losing drift angle = "the car straightened out / you lost your slide"; speed loss = "you scrubbed
-off too much speed"; snap risk = "the car nearly spun / got out of shape". The mistake_frequency
-JSON keys stay as the codes, but they must never appear in any human-readable sentence."""
+off too much speed"; snap risk = "the rear started to get away from you / the slide almost snapped
+past the point you could catch it" (this is the warning moment BEFORE a spin, not an actual spin).
+The mistake_frequency JSON keys stay as the codes, but they must never appear in any human-readable sentence."""
 
 
 def _load_previous_session(sessions_dir: str, current_path: str) -> dict | None:
