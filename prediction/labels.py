@@ -27,10 +27,14 @@ SPEED_LOSS_MAX_REAR_SLIP = 5.0    # rear slip low = not a controlled drift decel
 SPEED_LOSS_THROTTLE_MAX = 0.35    # not on throttle
 SPEED_LOSS_MIN_SPEED = 20.0
 
-# SNAP_RISK — sudden high yaw rate spike with erratic steering corrections
-SNAP_RISK_YAW_STD = 0.25          # erratic yaw = about to spin
+# SNAP_RISK — rotation accelerating in the direction it's already turning = losing it.
+# A controlled drift HOLDS a high yaw rate steadily; a snap has |yaw| growing fast.
+# The same-sign (growing) gate is what separates a real snap from an aggressive-but-held slide.
+SNAP_RISK_YAW_STD     = 0.30      # erratic yaw (raised from 0.25 — normal drift is fairly erratic)
 SNAP_RISK_MIN_LATERAL = 3.0       # actually sideways
-SNAP_RISK_MIN_SPEED = 20.0
+SNAP_RISK_MIN_SPEED   = 20.0
+SNAP_RISK_MIN_ABS_YAW = 0.45      # rad/s — meaningful rotation already underway
+SNAP_RISK_YAW_ACCEL   = 0.05      # rad/s per frame — rotation diverging fast, not being held
 
 
 def _load_corner_learning() -> dict[int, float]:
@@ -105,8 +109,15 @@ def label_frame(
 
     in_corner = _in_corner(world_x, world_z, corner_xz)
 
-    # SNAP_RISK — erratic yaw while sideways at speed (anywhere, not just corners)
-    if (yaw_rate_std > SNAP_RISK_YAW_STD
+    # SNAP_RISK — rotation accelerating in the same direction it's already going.
+    # yaw_rate * yaw_rate_delta > 0 means |yaw| is GROWING (same sign) — the car is
+    # rotating harder, not being caught. That's the signature of losing it, versus a
+    # controlled drift where yaw is high but roughly held (delta near zero / oscillating).
+    yaw_growing = (yaw_rate * yaw_rate_delta) > 0
+    if (abs(yaw_rate) > SNAP_RISK_MIN_ABS_YAW
+            and abs(yaw_rate_delta) > SNAP_RISK_YAW_ACCEL
+            and yaw_growing
+            and yaw_rate_std > SNAP_RISK_YAW_STD
             and lateral_speed > SNAP_RISK_MIN_LATERAL
             and speed > SNAP_RISK_MIN_SPEED):
         return "SNAP_RISK"

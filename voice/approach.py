@@ -22,6 +22,8 @@ MAX_WARN_DIST_M      = 60.0  # maximum warning distance in meters
 CORNER_ACTIVE_RADIUS_M = 25.0  # "in corner" within this radius of entry point
 CORNER_EXIT_RADIUS_M   = 12.0  # exit callout fires within this radius of exit point
 EXIT_YAW_THRESHOLD     = 15.0  # deg/s — suppress exit callout if not drifting
+REARM_MARGIN           = 1.4   # must travel 40% past the trigger boundary before it re-arms
+                               # (prevents re-fires when the car wobbles across the edge)
 
 # Context-aware approach thresholds
 YAW_INITIATED_THRESHOLD = 10.0   # deg/s — below this = car still pointed forward
@@ -260,12 +262,12 @@ class CornerApproachDetector:
             if ex is None or ez is None:
                 continue
             corner_type = corner.get("type", "MEDIUM")
-            in_window = _dist(x, z, ex, ez) <= CORNER_EXIT_RADIUS_M
-            if in_window:
+            dist = _dist(x, z, ex, ez)
+            if dist <= CORNER_EXIT_RADIUS_M:
                 if i not in self._exit_triggered:
                     self._exit_triggered.add(i)
                     return _get_exit_callout(i, corner_type)
-            else:
+            elif dist > CORNER_EXIT_RADIUS_M * REARM_MARGIN:
                 self._exit_triggered.discard(i)
         return None
 
@@ -312,14 +314,13 @@ class CornerApproachDetector:
         for i, corner in enumerate(self._corners):
             corner_type = corner.get("type", "MEDIUM")
             dist = _dist(x, z, corner["x"], corner["z"])
-            in_window = dist <= warn_dist
 
-            if in_window:
+            if dist <= warn_dist:
                 if i not in self._triggered:
                     self._triggered.add(i)
                     self._record_approach_speed(i, speed_kmh)
                     return self._context_callout(i, corner_type, speed_kmh, yaw_rate)
-            else:
+            elif dist > warn_dist * REARM_MARGIN:
                 self._triggered.discard(i)
 
         return None

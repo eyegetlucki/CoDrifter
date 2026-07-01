@@ -8,7 +8,7 @@ from prediction.labels import INT_TO_CLASS
 
 MODEL_PATH = os.path.join("models", "mistake_predictor.pkl")
 CONFIDENCE_THRESHOLD = 0.9
-HYSTERESIS_FRAMES = 4   # consecutive frames required before firing a callout
+HYSTERESIS_FRAMES = 8   # consecutive frames (~133ms at 60hz) required before firing a callout
 SPEED_GATE_KMH = 25.0   # suppress predictions below this speed
 
 
