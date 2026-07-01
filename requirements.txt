@@ -10,3 +10,6 @@ anthropic==0.25.8
 PyQt6==6.7.1
 keyboard==0.13.5
 pyqtgraph==0.14.0
+sounddevice==0.5.5
+cffi==2.0.0
+pycparser==3.0

@@ -12,11 +12,13 @@ anthropic_datas,   anthropic_bins,   anthropic_hidden   = collect_all("anthropic
 xgboost_datas,     xgboost_bins,     xgboost_hidden     = collect_all("xgboost")
 sklearn_hidden = collect_submodules("sklearn")
 scipy_datas,       scipy_bins,       scipy_hidden       = collect_all("scipy")
+sd_datas,          sd_bins,          sd_hidden          = collect_all("sounddevice")
+cffi_datas,        cffi_bins,        cffi_hidden        = collect_all("cffi")
 
 a = Analysis(
     ["app.py"],
     pathex=["."],
-    binaries=elevenlabs_bins + anthropic_bins + xgboost_bins + scipy_bins,
+    binaries=elevenlabs_bins + anthropic_bins + xgboost_bins + scipy_bins + sd_bins + cffi_bins,
     datas=[
         # App assets — land next to the exe (root of dist/CoDrifter/)
         ("driftline.ico",           "."),
@@ -29,6 +31,8 @@ a = Analysis(
         *anthropic_datas,
         *xgboost_datas,
         *scipy_datas,
+        *sd_datas,
+        *cffi_datas,
     ],
     hiddenimports=[
         # Qt
@@ -50,8 +54,11 @@ a = Analysis(
         "sniffio",
         "tokenizers",
         # Audio
+        *sd_hidden,
+        *cffi_hidden,
         "sounddevice",
         "soundfile",
+        "_cffi_backend",
         # Windows
         "win32api",
         "win32con",
