@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QObject
 
 import ui.theme as T
+from debrief.claude_debrief import _plain as _plain_mistake
 
 
 def _card(title: str = "") -> tuple[QFrame, QVBoxLayout]:
@@ -217,7 +218,7 @@ class DebriefTab(QWidget):
             mf_row.setSpacing(24)
             for k, v in mf.items():
                 color = T.ACCENT if v > 0 else T.TEXT_DIM
-                blk = _stat_block(k.replace("_", " "), str(v))
+                blk = _stat_block(_plain_mistake(k), str(v))
                 blk.findChild(QLabel, "", Qt.FindChildOption.FindDirectChildrenOnly)
                 mf_row.addWidget(blk)
             mf_row.addStretch()

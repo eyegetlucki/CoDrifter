@@ -14,6 +14,17 @@ load_dotenv()
 MODEL = "claude-sonnet-4-6"
 MISTAKE_CLASSES = ["LOSING_ANGLE", "SPEED_LOSS", "SNAP_RISK"]
 
+# Plain-English labels for drivers who don't know the internal terminology.
+MISTAKE_LABELS = {
+    "LOSING_ANGLE": "losing drift angle",
+    "SPEED_LOSS": "scrubbing off too much speed",
+    "SNAP_RISK": "close to spinning out",
+}
+
+
+def _plain(cls: str) -> str:
+    return MISTAKE_LABELS.get(cls, cls.replace("_", " ").lower())
+
 SETTINGS_PATH  = os.path.join("data", "settings.json")
 TRACK_MAPS_DIR = os.path.join("data", "track_maps")
 CORNER_ACTIVE_RADIUS_M = 25.0   # matches prediction/labels.py and voice/approach.py
@@ -221,7 +232,7 @@ Previous session for comparison:
     if summary.get("per_corner"):
         lines = []
         for cname, info in summary["per_corner"].items():
-            mistakes = ", ".join(f"{k} x{v}" for k, v in info["mistakes"].items()) or "clean"
+            mistakes = ", ".join(f"{_plain(k)} x{v}" for k, v in info["mistakes"].items()) or "clean"
             lines.append(f"  - {cname} ({info['type']}): avg angle {info['avg_angle_rad_s']} rad/s | {mistakes}")
         per_corner_block = "\n- Per-corner breakdown (higher avg angle = more committed drift):\n" + "\n".join(lines)
 
@@ -242,9 +253,9 @@ SESSION TELEMETRY SUMMARY:
 - Worst sector by speed: {summary['worst_sector']}
 - Tyre temps (avg °C): {json.dumps(summary['tyre_temps_avg'])}
 - Detected mistake events:
-  - LOSING_ANGLE (car straightening unintentionally): {summary['mistake_events']['LOSING_ANGLE']}
-  - SPEED_LOSS (bleeding speed without rear slip): {summary['mistake_events']['SPEED_LOSS']}
-  - SNAP_RISK (erratic yaw, about to spin): {summary['mistake_events']['SNAP_RISK']}{per_corner_block}
+  - Losing drift angle (car straightening out mid-corner): {summary['mistake_events']['LOSING_ANGLE']}
+  - Scrubbing off too much speed: {summary['mistake_events']['SPEED_LOSS']}
+  - Close to spinning out (car on the edge of control): {summary['mistake_events']['SNAP_RISK']}{per_corner_block}
 {prev_block}
 Return ONLY valid JSON — no markdown, no explanation, no prefix text. Schema:
 {{
@@ -272,9 +283,16 @@ Return ONLY valid JSON — no markdown, no explanation, no prefix text. Schema:
 consistency_score: 1.0 = perfectly consistent laps, 0.0 = wildly inconsistent.
 improvements: exactly 3 drift-specific, actionable coaching points. When the per-corner
 breakdown shows a corner with the most mistakes or the lowest sustained angle, name that
-specific corner (e.g. "You lost angle most through Corner 3 — commit throttle earlier on exit").
+specific corner (e.g. "You kept straightening out through Corner 3 — commit throttle earlier on exit").
 coaching_tip: one specific thing to focus on next session, referencing a corner if the data points to one.
-vs_previous_session: compare to the previous session if data was provided, otherwise "First session"."""
+vs_previous_session: compare to the previous session if data was provided, otherwise "First session".
+
+IMPORTANT — write for a beginner who does not know racing jargon. In every text field
+(improvements, coaching_tip, vs_previous_session) use plain, everyday language. NEVER write
+the internal codes "LOSING_ANGLE", "SPEED_LOSS", or "SNAP_RISK". Describe them in plain words:
+losing drift angle = "the car straightened out / you lost your slide"; speed loss = "you scrubbed
+off too much speed"; snap risk = "the car nearly spun / got out of shape". The mistake_frequency
+JSON keys stay as the codes, but they must never appear in any human-readable sentence."""
 
 
 def _load_previous_session(sessions_dir: str, current_path: str) -> dict | None:
@@ -376,7 +394,7 @@ def _print_debrief(debrief: dict, summary: dict):
     mf = perf.get("mistake_frequency", summary["mistake_events"])
     if mf:
         print(f"  Mistake events:    ", end="")
-        parts = [f"{k}: {v}" for k, v in mf.items() if v > 0]
+        parts = [f"{_plain(k)}: {v}" for k, v in mf.items() if v > 0]
         print(", ".join(parts) if parts else "None detected")
     print()
 
@@ -384,7 +402,7 @@ def _print_debrief(debrief: dict, summary: dict):
     if per_corner:
         print("  PER-CORNER BREAKDOWN:")
         for cname, info in per_corner.items():
-            mistakes = ", ".join(f"{k} x{v}" for k, v in info["mistakes"].items()) or "clean"
+            mistakes = ", ".join(f"{_plain(k)} x{v}" for k, v in info["mistakes"].items()) or "clean"
             print(f"    {cname} ({info['type']}): avg angle {info['avg_angle_rad_s']} rad/s  -  {mistakes}")
         print()
 
