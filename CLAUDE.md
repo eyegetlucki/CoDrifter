@@ -420,6 +420,25 @@ Callout system improvements:
 
 Note on `data/track_learning/`: NOT gitignored — this is per-driver learned data, commits optional. Keep locally, can be copied like session CSVs on reinstall.
 
+Data-driven threshold calibration (analyzed 200,001 real Klutch Kickers frames across 6 sessions with full telemetry — the 2026-06-27 batch predates yaw logging):
+- `prediction/labels.py` LOSING_ANGLE was DEAD (0.00%) — required `yaw_rate_delta < -0.3` but real in-corner yaw acceleration peaks ~0.09/frame. Rewrote **direction-aware**: fires when `|yaw|` is shrinking (`(yaw_rate*yaw_rate_delta) < 0`, `abs(delta) > LOSING_ANGLE_YAW_ACCEL=0.06`, `abs(yaw_rate_mean) > LOSING_ANGLE_MIN_YAW=0.4`). Now ~0.42%. This works both drift directions.
+- SNAP_RISK was over-firing (2.02%): `SNAP_RISK_MIN_ABS_YAW` 0.45→1.2, `SNAP_RISK_YAW_ACCEL`→0.07, `SNAP_RISK_YAW_STD`→0.40. Now ~0.26%. The same-sign "growing" gate (`yaw*delta > 0`) separates a real snap from a held aggressive drift.
+- `_is_real_corner()` guard filters legacy (0,0) corners (normalized-position-era maps never remapped to world X/Z) that created a phantom corner at the origin.
+- `prediction/model.py`: `HYSTERESIS_FRAMES` 4→8 (~133ms). `voice/approach.py`: `REARM_MARGIN=1.4` (trigger re-arms only once clearly past the boundary — stops re-fires on long sweepers).
+- Class weighting note: raw test precision looks low (LOSING_ANGLE 0.22) but at the 90% runtime confidence gate it's 1.00. The sqrt weighting in `trainer.py` is optimal — lighter weighting kills LOSING_ANGLE entirely (never reaches 90% confidence). Do NOT reduce it.
+
+Debrief overhaul (`debrief/claude_debrief.py`):
+- Removed the duplicated, divergent inline mistake-detection thresholds — now reuses `prediction.labels.label_dataframe` as the single source of truth, so debrief counts can never drift out of sync with live detection.
+- Per-corner attribution: `_detect_mistakes()` attributes each labeled mistake to the nearest corner (25m) + tracks sustained `abs(yaw_rate)` per corner. Claude gives corner-specific coaching ("Corner 2 is your biggest problem area…"). Active track name via `_load_active_corner_map()` (settings `active_track`, falls back to first map with real corners so attribution matches labeling).
+- Plain-English labels — `MISTAKE_LABELS`/`_plain()`: LOSING_ANGLE="losing drift angle", SPEED_LOSS="scrubbing off too much speed", SNAP_RISK="about to lose the rear" (the warning moment BEFORE a spin). Claude is instructed to never use the internal codes in prose. `ui/debrief_tab.py` imports `_plain` for stat blocks. The `mistake_frequency` JSON keys stay canonical for the code/UI contract.
+- Avoid non-ASCII (×, →, —) in terminal-printed strings — Windows cp1252 console raises UnicodeEncodeError. Use plain `x`, `-`.
+
+Environment/build fixes:
+- `voice/coach.py`: audio playback switched from `elevenlabs.play()` (spawned an mpg123/ffplay **console window** on Windows) to `sounddevice` with `pcm_44100` output. `requirements.txt`: `sounddevice==0.5.5`, `cffi==2.0.0`, `pycparser==3.0`. `build.spec`: `collect_all("sounddevice")` + `collect_all("cffi")` (bundles PortAudio DLL + CFFI backend — hiddenimports alone is insufficient).
+- `httpx==0.27.2` pinned — `anthropic==0.25.8` passes `proxies=` which httpx 0.28 removed; the debrief crashed on `anthropic.Anthropic()` init in any env with newer httpx.
+
+Current app version: **v1.0.12**. Retrain in the standalone app (active track = Klutch Kickers) to bake the calibrated labels into the live model.
+
 Do not start Phase 5 until these criteria are met and confirmed.
 
 ---
