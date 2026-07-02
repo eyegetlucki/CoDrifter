@@ -33,6 +33,23 @@ HOT_MULTIPLIER          = 1.2    # 20% above personal average = hot entry
 MIN_PASSES_FOR_SPEED_CTX = 3     # passes needed before speed context activates
 MAX_SPEED_HISTORY       = 20     # max passes stored per corner
 
+# Angle-depth coaching (learned per-corner sustained angle)
+MIN_PASSES_FOR_ANGLE = 3         # corner passes needed before angle coaching activates
+MAX_ANGLE_HISTORY    = 20        # learned angle samples kept per corner
+ANGLE_MIN_SAMPLES    = 20        # frames in a pass before we judge its angle
+SHALLOW_RATIO        = 0.75      # below 75% of your norm = genuinely too shallow
+DEEP_RATIO           = 1.4       # above 140% of your norm = overcooking
+GOOD_RATIO           = 1.1       # clearly above your norm with no mistake = a good committed corner
+POSITIVE_ONE_IN_N    = 3         # praise ~1 of every N eligible corners
+SAVE_STEER           = 0.7       # peak opposite-lock steering that counts as a real save
+
+# Mid-link "lost the drift" detection (geometry-gated so reset straights never trigger)
+MAX_LINK_LEN   = 70.0            # only watch links shorter than this (m)
+STRAIGHT_YAW   = 0.3             # rad/s — below this = straightened out
+STRAIGHT_HOLD  = 30              # frames (~0.5s) of sustained straighten before firing
+LINK_MIN_SPEED = 40.0           # only flag lost links while still at drift speed
+WAS_DRIFTING_YAW = 0.7          # peak yaw that confirms you were actually drifting
+
 
 def _dist(x1: float, z1: float, x2: float, z2: float) -> float:
     return math.sqrt((x1 - x2) ** 2 + (z1 - z2) ** 2)
@@ -124,6 +141,40 @@ CLIP_MISS_CALLOUTS = [
     "Missed it — get closer to the clip",
 ]
 
+ANGLE_CALLOUTS = {
+    "shallow": [
+        "More angle — commit harder through here",
+        "Too shallow — give it more angle",
+        "You can hold more angle here",
+        "Dig in — more angle through this one",
+    ],
+    "deep": [
+        "Ease the angle — settle it down",
+        "Bit much angle — bring it back",
+        "Overcooking the angle — smooth it out",
+    ],
+}
+
+POSITIVE_CALLOUTS = {
+    "good": [
+        "Nice — great commitment there",
+        "Clean and committed — love it",
+        "That's the angle — beautiful",
+        "Perfect, keep that going",
+    ],
+    "save": [
+        "Good save — you caught it",
+        "Nice recovery — stayed in it",
+        "Great catch — held it together",
+    ],
+}
+
+LINK_LOST_CALLOUTS = [
+    "You dropped the link — get it back into corner {next}",
+    "Lost the drift on the link — keep it alive into corner {next}",
+    "Straightened out — link it into corner {next}",
+]
+
 
 class CornerApproachDetector:
     def __init__(self):
@@ -137,6 +188,18 @@ class CornerApproachDetector:
         self._recent: deque[str] = deque(maxlen=3)  # anti-repeat: no line repeats within 3 callouts
         self._exit_flags: deque = deque(maxlen=60)  # rolling ~1s of exit mistake flags
         self._exit_yaw: deque = deque(maxlen=60)    # rolling ~1s of yaw for manji detection
+        # Angle-depth coaching + positive reinforcement (per-corner pass tracking)
+        self._corner_angles: dict[int, list[float]] = {}   # learned per-corner avg |yaw|
+        self._cur_angle: dict[int, list[float]] = {}       # current pass |yaw| samples
+        self._cur_had_mistake: dict[int, bool] = {}
+        self._cur_had_snap: dict[int, bool] = {}
+        self._cur_max_cs: dict[int, float] = {}            # peak countersteer this pass (for saves)
+        self._angle_fired: set[int] = set()
+        self._in_zone: set[int] = set()
+        self._praise_counter: int = 0
+        # Mid-link lost-drift watching
+        self._link_len: dict[int, float] = {}              # link i -> distance exit_i..entry_{i+1}
+        self._link_watch: dict[int, dict] = {}             # active watches -> {"straight": n, "fired": bool}
         self._track_slug: str = ""
         self._loaded = False
 
@@ -174,6 +237,15 @@ class CornerApproachDetector:
         note = f" ({skipped} skipped — no x/z data)" if skipped else ""
         print(f"Corner map loaded: {usable} corners from {path}{note}")
 
+        # Precompute link lengths: corner i's exit -> corner (i+1)'s entry.
+        self._link_len = {}
+        n = len(self._corners)
+        for i, c in enumerate(self._corners):
+            ex, ez = c.get("exit_x"), c.get("exit_z")
+            nxt = self._corners[(i + 1) % n]
+            if ex is not None and ez is not None:
+                self._link_len[i] = _dist(ex, ez, nxt["x"], nxt["z"])
+
         self._load_learning(track_slug)
         return self._loaded
 
@@ -188,17 +260,22 @@ class CornerApproachDetector:
                 data = json.load(f)
             raw_speeds = data.get("corner_approach_speeds", {})
             self._approach_speeds = {int(k): v for k, v in raw_speeds.items()}
+            raw_angles = data.get("corner_angles", {})
+            self._corner_angles = {int(k): v for k, v in raw_angles.items()}
             print(f"Track learning loaded: {len(self._approach_speeds)} corners from {path}")
         except Exception as e:
             print(f"[approach] Could not load track learning: {e}")
 
     def save_learning(self, track_slug: str = ""):
         slug = track_slug or self._track_slug
-        if not slug or not self._approach_speeds:
+        if not slug or not (self._approach_speeds or self._corner_angles):
             return
         os.makedirs(TRACK_LEARNING_DIR, exist_ok=True)
         path = os.path.join(TRACK_LEARNING_DIR, f"{slug}.json")
-        data = {"corner_approach_speeds": {str(k): v for k, v in self._approach_speeds.items()}}
+        data = {
+            "corner_approach_speeds": {str(k): v for k, v in self._approach_speeds.items()},
+            "corner_angles": {str(k): v for k, v in self._corner_angles.items()},
+        }
         try:
             with open(path, "w") as f:
                 json.dump(data, f, indent=2)
@@ -264,9 +341,42 @@ class CornerApproachDetector:
             if dist <= CORNER_EXIT_RADIUS_M:
                 if i not in self._exit_triggered:
                     self._exit_triggered.add(i)
+                    self._maybe_start_link_watch(i)
                     return self._exit_mistake_callout(i)
             elif dist > CORNER_EXIT_RADIUS_M * REARM_MARGIN:
                 self._exit_triggered.discard(i)
+        return None
+
+    def _maybe_start_link_watch(self, corner_idx: int):
+        """On crossing corner i's exit, start watching the link to i+1 — but only if the
+        link is short (a real drift link, not a long reset straight) and you were drifting."""
+        link_len = self._link_len.get(corner_idx)
+        if link_len is None or link_len > MAX_LINK_LEN:
+            return
+        peak = max((abs(v) for v in self._exit_yaw), default=0.0)
+        if peak < WAS_DRIFTING_YAW:
+            return
+        self._link_watch[corner_idx] = {"straight": 0, "fired": False}
+
+    def _update_links(self, x: float, z: float, speed_kmh: float, yaw_rate: float) -> Optional[str]:
+        """Fire once if the driver sustains a straighten on a short link between corners."""
+        n = len(self._corners)
+        for i in list(self._link_watch.keys()):
+            state = self._link_watch[i]
+            nxt = self._corners[(i + 1) % n]
+            # Reached the next corner's zone — stop watching this link.
+            if _dist(x, z, nxt["x"], nxt["z"]) <= CORNER_ACTIVE_RADIUS_M:
+                self._link_watch.pop(i, None)
+                continue
+            if (abs(yaw_rate) < STRAIGHT_YAW and speed_kmh > LINK_MIN_SPEED
+                    and not is_manji(self._exit_yaw)):
+                state["straight"] += 1
+            else:
+                state["straight"] = 0
+            if state["straight"] >= STRAIGHT_HOLD and not state["fired"]:
+                state["fired"] = True
+                nxt_num = (i + 1) % n + 1
+                return self._pick(LINK_LOST_CALLOUTS).format(next=nxt_num)
         return None
 
     def _exit_mistake_callout(self, corner_idx: int) -> Optional[str]:
@@ -330,3 +440,87 @@ class CornerApproachDetector:
                 self._triggered.discard(i)
 
         return None
+
+    # ── Angle-depth coaching, positive reinforcement, mid-link (one per-frame entry) ──
+
+    def check_corner(self, x: float, z: float, speed_kmh: float, yaw_rate: float,
+                     steering: float, mistake_flag: Optional[str]) -> Optional[tuple]:
+        """Returns (kind, text) where kind is 'LINK' | 'ANGLE' | 'PRAISE', or None.
+        Accumulates per-corner-pass state and emits at most one coaching line per frame."""
+        if not self._loaded or speed_kmh < 10:
+            return None
+
+        # Mid-link lost-drift takes priority (it's the most time-sensitive).
+        link = self._update_links(x, z, speed_kmh, yaw_rate)
+        if link:
+            return ("LINK", link)
+
+        ay = abs(yaw_rate)
+        for i, corner in enumerate(self._corners):
+            d = _dist(x, z, corner["x"], corner["z"])
+            if d <= CORNER_ACTIVE_RADIUS_M:
+                if i not in self._in_zone:
+                    self._in_zone.add(i)
+                    self._cur_angle[i] = []
+                    self._cur_had_mistake[i] = False
+                    self._cur_had_snap[i] = False
+                    self._cur_max_cs[i] = 0.0
+                    self._angle_fired.discard(i)
+                self._cur_angle[i].append(ay)
+                if mistake_flag:
+                    self._cur_had_mistake[i] = True
+                if mistake_flag == "SNAP_RISK":
+                    self._cur_had_snap[i] = True
+                if steering * yaw_rate < 0:  # countersteering
+                    self._cur_max_cs[i] = max(self._cur_max_cs[i], abs(steering))
+            elif i in self._in_zone and d > CORNER_ACTIVE_RADIUS_M * REARM_MARGIN:
+                self._in_zone.discard(i)
+                out = self._finish_pass(i)
+                if out:
+                    return out
+        return None
+
+    @staticmethod
+    def _sustained(samples: list[float]) -> float:
+        """The held drift angle — mean of the top half of |yaw| samples, which ignores
+        the low-yaw entry/exit ramps and represents the angle actually carried."""
+        s = sorted(samples)
+        return sum(s[len(s) // 2:]) / max(len(s) - len(s) // 2, 1)
+
+    def _finish_pass(self, i: int) -> Optional[tuple]:
+        """On leaving a corner: judge sustained angle vs your learned norm (shallow/deep),
+        else consider rare praise. Returns (kind, text) or None. Corrective beats praise."""
+        cur = self._cur_angle.get(i, [])
+        if len(cur) < ANGLE_MIN_SAMPLES:
+            return None
+        sustained = self._sustained(cur)
+        hist = self._corner_angles.get(i, [])
+        learned = (sum(hist) / len(hist)) if len(hist) >= MIN_PASSES_FOR_ANGLE else None
+
+        # Record this pass's sustained angle into the learned history.
+        self._corner_angles.setdefault(i, []).append(sustained)
+        if len(self._corner_angles[i]) > MAX_ANGLE_HISTORY:
+            self._corner_angles[i] = self._corner_angles[i][-MAX_ANGLE_HISTORY:]
+
+        if learned is None:  # still warming up
+            return None
+
+        # Angle coaching (corrective) first.
+        if sustained < learned * SHALLOW_RATIO:
+            return ("ANGLE", self._pick(ANGLE_CALLOUTS["shallow"]))
+        if sustained > learned * DEEP_RATIO and not self._cur_had_snap.get(i):
+            return ("ANGLE", self._pick(ANGLE_CALLOUTS["deep"]))
+
+        # Otherwise, rare earned praise.
+        recovered = 0.4 <= (sum(cur[-10:]) / len(cur[-10:])) <= 1.6
+        candidate = None
+        if self._cur_had_snap.get(i) and recovered and self._cur_max_cs.get(i, 0.0) > SAVE_STEER:
+            candidate = "save"
+        elif not self._cur_had_mistake.get(i) and sustained >= learned * GOOD_RATIO:
+            candidate = "good"
+        if candidate is None:
+            return None
+        self._praise_counter += 1
+        if self._praise_counter % POSITIVE_ONE_IN_N != 0:
+            return None
+        return ("PRAISE", self._pick(POSITIVE_CALLOUTS[candidate]))

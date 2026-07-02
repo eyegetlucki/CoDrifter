@@ -131,6 +131,11 @@ class TelemetryWorker(QObject):
                 frame.is_in_pit, frame.is_engine_running,
                 yaw_rate=frame.yaw_rate, mistake_flag=exit_flag,
             )
+            self._coach.check_coaching(
+                frame.world_position_x, frame.world_position_z, frame.speed_kmh,
+                frame.is_in_pit, frame.is_engine_running,
+                yaw_rate=frame.yaw_rate, steering=frame.steering_angle, mistake_flag=exit_flag,
+            )
 
             prediction_type = "CLEAN"
             prediction_conf = 0.0
