@@ -580,8 +580,15 @@ class DashboardTab(QWidget):
     @pyqtSlot(dict)
     def on_telemetry(self, data: dict):
         self._speed_val.setText(f"{data['speed_kmh']:.0f}")
-        gear = data.get("gear", 0)
-        self._gear_val.setText("N" if gear == 0 else str(gear))
+        # AC encodes gear as 0=Reverse, 1=Neutral, 2=1st, 3=2nd, ...
+        gear = data.get("gear", 1)
+        if gear <= 0:
+            gear_text = "R"
+        elif gear == 1:
+            gear_text = "N"
+        else:
+            gear_text = str(gear - 1)
+        self._gear_val.setText(gear_text)
         self._rpm_val.setText(f"{data.get('rpm', 0):.0f}")
         self._throttle_bar.set_value(data.get("throttle", 0))
         self._brake_bar.set_value(data.get("brake", 0))
