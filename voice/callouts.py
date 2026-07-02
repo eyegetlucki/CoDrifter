@@ -1,4 +1,5 @@
 import random
+from collections import deque
 
 CALLOUTS = {
     "LOSING_ANGLE": [
@@ -22,6 +23,14 @@ CALLOUTS = {
 }
 
 
+_recent: deque[str] = deque(maxlen=3)  # anti-repeat: no mistake line repeats within 3 callouts
+
+
 def get_callout(mistake_type: str) -> str | None:
     options = CALLOUTS.get(mistake_type)
-    return random.choice(options) if options else None
+    if not options:
+        return None
+    fresh = [o for o in options if o not in _recent]
+    choice = random.choice(fresh) if fresh else random.choice(options)
+    _recent.append(choice)
+    return choice

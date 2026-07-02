@@ -9,6 +9,7 @@ import json
 import math
 import os
 import random
+from collections import deque
 from typing import Optional
 
 CORNER_MAP_PATH  = os.path.join("data", "corner_map.json")
@@ -21,13 +22,14 @@ MAX_WARN_DIST_M      = 60.0  # maximum warning distance in meters
 
 CORNER_ACTIVE_RADIUS_M = 25.0  # "in corner" within this radius of entry point
 CORNER_EXIT_RADIUS_M   = 12.0  # exit callout fires within this radius of exit point
-EXIT_YAW_THRESHOLD     = 15.0  # deg/s — suppress exit callout if not drifting
+EXIT_YAW_THRESHOLD     = 0.4   # rad/s — suppress exit callout if not actually drifting
+                               # (yaw_rate from AC is rad/s: drift p50~0.65, straight~0)
 REARM_MARGIN           = 1.4   # must travel 40% past the trigger boundary before it re-arms
                                # (prevents re-fires when the car wobbles across the edge)
 
 # Context-aware approach thresholds
-YAW_INITIATED_THRESHOLD = 10.0   # deg/s — below this = car still pointed forward
-HOT_MULTIPLIER          = 1.15   # 15% above personal average = hot entry
+YAW_INITIATED_THRESHOLD = 0.4    # rad/s — below this = car still pointed forward / not rotating
+HOT_MULTIPLIER          = 1.2    # 20% above personal average = hot entry
 MIN_PASSES_FOR_SPEED_CTX = 3     # passes needed before speed context activates
 MAX_SPEED_HISTORY       = 20     # max passes stored per corner
 
@@ -97,7 +99,7 @@ CALLOUTS: dict[str, list[str]] = {
     ],
 }
 
-# Context-aware approach callouts (picked randomly within each bucket)
+# Context-aware approach callouts — only spoken when the driver is too hot.
 CONTEXT_CALLOUTS = {
     "hot_no_angle": [
         "Too fast and too straight — brake and initiate",
@@ -109,22 +111,7 @@ CONTEXT_CALLOUTS = {
         "Good angle but too fast — ease off slightly",
         "You're sideways but carrying too much — back off a touch",
     ],
-    "speed_ok_no_angle": [
-        "Get sideways now — initiate before the corner",
-        "Speed's fine but you're too straight — flick it",
-        "Good speed — just need the rotation now",
-    ],
 }
-
-_exit_index: dict[int, int] = {}
-
-
-def _get_exit_callout(corner_idx: int, corner_type: str) -> str:
-    options = EXIT_CALLOUTS.get(corner_type, EXIT_CALLOUTS["MEDIUM"])
-    idx = _exit_index.get(corner_idx, 0)
-    text = options[idx % len(options)]
-    _exit_index[corner_idx] = idx + 1
-    return text
 
 
 CLIP_MISS_CALLOUTS = [
@@ -132,7 +119,6 @@ CLIP_MISS_CALLOUTS = [
     "Wide of the clip — tighten up",
     "Missed it — get closer to the clip",
 ]
-_clip_miss_index = 0
 
 
 class CornerApproachDetector:
@@ -144,8 +130,16 @@ class CornerApproachDetector:
         self._zone_active: set[int] = set()
         self._clip_hit: set[int] = set()
         self._approach_speeds: dict[int, list[float]] = {}  # corner_idx -> [speed, ...]
+        self._recent: deque[str] = deque(maxlen=3)  # anti-repeat: no line repeats within 3 callouts
         self._track_slug: str = ""
         self._loaded = False
+
+    def _pick(self, options: list[str]) -> str:
+        """Random choice that avoids repeating any of the last 3 spoken lines."""
+        fresh = [o for o in options if o not in self._recent]
+        choice = random.choice(fresh) if fresh else random.choice(options)
+        self._recent.append(choice)
+        return choice
 
     def load(self, track_slug: str = "") -> bool:
         self._track_slug = track_slug
@@ -223,25 +217,17 @@ class CornerApproachDetector:
             self._approach_speeds[corner_idx] = history[-MAX_SPEED_HISTORY:]
 
     def _context_callout(self, corner_idx: int, corner_type: str, speed_kmh: float, yaw_rate: float) -> str:
+        # Only override the standard callout when the driver is genuinely hot vs their
+        # own learned average for this corner. Being straight on approach is normal, so
+        # there's no "you should be rotating" nag — the type callouts carry that coaching.
         avg = self._avg_approach_speed(corner_idx)
-        initiated = abs(yaw_rate) >= YAW_INITIATED_THRESHOLD
+        if avg is not None and speed_kmh > avg * HOT_MULTIPLIER:
+            if abs(yaw_rate) >= YAW_INITIATED_THRESHOLD:
+                return self._pick(CONTEXT_CALLOUTS["hot_has_angle"])   # hot but already rotating
+            return self._pick(CONTEXT_CALLOUTS["hot_no_angle"])        # hot and still straight
 
-        if avg is not None:
-            hot = speed_kmh > avg * HOT_MULTIPLIER
-            if hot and not initiated:
-                return random.choice(CONTEXT_CALLOUTS["hot_no_angle"])
-            if hot and initiated:
-                return random.choice(CONTEXT_CALLOUTS["hot_has_angle"])
-            if not hot and not initiated:
-                return random.choice(CONTEXT_CALLOUTS["speed_ok_no_angle"])
-            # Good speed + good angle — use the standard corner type callout
-        elif not initiated:
-            # No speed history yet but car is clearly not initiated
-            return random.choice(CONTEXT_CALLOUTS["speed_ok_no_angle"])
-
-        # Default: good approach or not enough data — type-specific callout
-        options = CALLOUTS.get(corner_type, CALLOUTS["MEDIUM"])
-        return random.choice(options)
+        # Normal approach — standard corner-type callout
+        return self._pick(CALLOUTS.get(corner_type, CALLOUTS["MEDIUM"]))
 
     def is_in_corner(self, x: float, z: float) -> bool:
         if not self._loaded:
@@ -266,13 +252,12 @@ class CornerApproachDetector:
             if dist <= CORNER_EXIT_RADIUS_M:
                 if i not in self._exit_triggered:
                     self._exit_triggered.add(i)
-                    return _get_exit_callout(i, corner_type)
+                    return self._pick(EXIT_CALLOUTS.get(corner_type, EXIT_CALLOUTS["MEDIUM"]))
             elif dist > CORNER_EXIT_RADIUS_M * REARM_MARGIN:
                 self._exit_triggered.discard(i)
         return None
 
     def check_clips(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
-        global _clip_miss_index
         if not self._clip_zones or speed_kmh < 10:
             return None
         for i, zone in enumerate(self._clip_zones):
@@ -299,9 +284,7 @@ class CornerApproachDetector:
             if i in self._zone_active and exit_dist < 15.0:
                 self._zone_active.discard(i)
                 if i not in self._clip_hit and abs(yaw_rate) >= EXIT_YAW_THRESHOLD:
-                    text = CLIP_MISS_CALLOUTS[_clip_miss_index % len(CLIP_MISS_CALLOUTS)]
-                    _clip_miss_index += 1
-                    return text
+                    return self._pick(CLIP_MISS_CALLOUTS)
 
         return None
 
