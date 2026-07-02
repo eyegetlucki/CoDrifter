@@ -1,8 +1,10 @@
 import os
+import logging
 import threading
 import queue
 import numpy as np
 import sounddevice as sd
+import miniaudio
 from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
 
@@ -15,12 +17,29 @@ load_dotenv()
 VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
 MODEL_ID = "eleven_flash_v2_5"
 
+# File logging so voice failures are visible in the packaged app (console=False).
+_LOG_DIR = os.path.join("data")
+logger = logging.getLogger("codrifter.voice")
+if not logger.handlers:
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        _handler = logging.FileHandler(os.path.join(_LOG_DIR, "coach.log"), encoding="utf-8")
+        _handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        logger.addHandler(_handler)
+        logger.setLevel(logging.INFO)
+    except Exception:
+        pass
+
 
 class VoiceCoach:
     def __init__(self, enabled: bool = False, same_mistake_cooldown: float = 5.0,
                  any_callout_cooldown: float = 2.0, approach_enabled: bool = True,
                  enabled_mistakes: dict | None = None):
         self._client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+        logger.info(
+            "VoiceCoach init — api_key_present=%s voice_id_present=%s",
+            bool(os.getenv("ELEVENLABS_API_KEY")), bool(VOICE_ID),
+        )
         self._cooldown = CooldownManager(same_mistake_cooldown, any_callout_cooldown)
         self._approach = CornerApproachDetector()
         self._queue: queue.Queue = queue.Queue(maxsize=1)
@@ -44,14 +63,20 @@ class VoiceCoach:
         self.enabled_mistakes = enabled_mistakes
 
     def _speak(self, text: str):
-        audio_bytes = b"".join(self._client.text_to_speech.convert(
+        # mp3_44100_128 works on every ElevenLabs tier (pcm_44100 needs Pro+).
+        # Decode in-process with miniaudio and play via sounddevice — NO subprocess,
+        # so no console window ever appears.
+        mp3 = b"".join(self._client.text_to_speech.convert(
             voice_id=VOICE_ID,
             text=text,
             model_id=MODEL_ID,
-            output_format="pcm_44100",
+            output_format="mp3_44100_128",
         ))
-        audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        sd.play(audio_array, samplerate=44100)
+        decoded = miniaudio.decode(mp3)
+        audio = np.frombuffer(decoded.samples, dtype=np.int16).astype(np.float32) / 32768.0
+        if decoded.nchannels > 1:
+            audio = audio.reshape(-1, decoded.nchannels)
+        sd.play(audio, samplerate=decoded.sample_rate)
         sd.wait()
 
     def _worker(self):
@@ -61,8 +86,9 @@ class VoiceCoach:
                 break
             try:
                 self._speak(item)
-            except Exception as e:
-                print(f"\n[voice] Error: {e}")
+                logger.info("spoke: %s", item)
+            except Exception:
+                logger.exception("voice playback failed for: %s", item)
             finally:
                 self._queue.task_done()
 
