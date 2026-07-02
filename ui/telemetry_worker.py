@@ -1,12 +1,15 @@
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
 from datetime import datetime
+from collections import deque
 import os
 
 from telemetry.reader import TelemetryReader
 from telemetry.models import TelemetryFrame
 from prediction.features import FeatureExtractor
 from prediction.model import MistakePredictor
+from prediction.labels import classify_drift_mistake
 from voice.coach import VoiceCoach
+from voice.approach import is_manji
 from ui.settings_manager import SettingsManager
 
 SESSIONS_DIR = os.path.join("data", "sessions")
@@ -81,9 +84,11 @@ class TelemetryWorker(QObject):
 
         frame_count = 0
         last_prediction = "CLEAN"
+        prev_yaw = 0.0
+        yaw_win: deque = deque(maxlen=30)  # ~0.5s of yaw for the live manji guard
 
         def on_frame(frame: TelemetryFrame, count: int):
-            nonlocal last_prediction, frame_count
+            nonlocal last_prediction, frame_count, prev_yaw
             frame_count = count
 
             fv = self._extractor.update(
@@ -100,6 +105,17 @@ class TelemetryWorker(QObject):
                 wheel_slip_rr=frame.wheel_slip_rr,
             )
 
+            # Per-frame drift-mistake flag (gate-free) for the exit/transition detector.
+            yaw_win.append(frame.yaw_rate)
+            exit_flag = None
+            if fv is not None:
+                yaw_delta = fv.yaw_rate - prev_yaw
+                exit_flag = classify_drift_mistake(
+                    fv.yaw_rate, yaw_delta, fv.yaw_rate_mean, fv.yaw_rate_std,
+                    fv.lateral_speed, fv.speed_kmh, fv.throttle, fv.speed_delta, fv.rear_slip_mean,
+                )
+            prev_yaw = frame.yaw_rate
+
             self._coach.check_approach(
                 frame.world_position_x, frame.world_position_z, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
@@ -113,7 +129,7 @@ class TelemetryWorker(QObject):
             self._coach.check_exit(
                 frame.world_position_x, frame.world_position_z, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
-                yaw_rate=frame.yaw_rate,
+                yaw_rate=frame.yaw_rate, mistake_flag=exit_flag,
             )
 
             prediction_type = "CLEAN"
@@ -124,7 +140,9 @@ class TelemetryWorker(QObject):
                 if pred:
                     prediction_type = pred.mistake_type
                     prediction_conf = pred.confidence
-                    if pred.is_mistake:
+                    # Manji / drifting the straight to transition is intentional — don't
+                    # flag it as a mistake (rhythmic yaw sway, not a one-directional error).
+                    if pred.is_mistake and not is_manji(yaw_win):
                         self._coach.call_out(pred.mistake_type, frame.is_in_pit, frame.is_engine_running)
 
             if count % 6 == 0:  # ~10hz UI update

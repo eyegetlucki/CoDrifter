@@ -38,33 +38,37 @@ def _dist(x1: float, z1: float, x2: float, z2: float) -> float:
     return math.sqrt((x1 - x2) ** 2 + (z1 - z2) ** 2)
 
 
-EXIT_CALLOUTS: dict[str, list[str]] = {
-    "TIGHT": [
-        "Good exit — drive it out",
-        "Clear — open the throttle now",
-        "Corner done — carry the angle",
+# Exit callouts are corrective-only and framed toward linking the NEXT corner.
+# Keyed by mistake type; {next} is filled with the upcoming corner number.
+EXIT_MISTAKE_CALLOUTS: dict[str, list[str]] = {
+    "dropped": [
+        "You dropped it — you'll be late linking into corner {next}",
+        "Lost the angle on exit — reset for corner {next}",
+        "Straightened too early — that breaks the link",
+        "Angle died on exit — stay committed into corner {next}",
     ],
-    "MEDIUM": [
-        "Exit — maintain your angle out",
-        "Clear — smooth throttle out",
-        "Drive it out — hold the drift",
+    "snap": [
+        "Overcooked the exit — you'll miss the link into corner {next}",
+        "Nearly spun it — regroup for corner {next}",
+        "Too much on exit — that kills your flow",
+        "Snapped on exit — settle it before corner {next}",
     ],
-    "HAIRPIN": [
-        "Hairpin exit — unwind and drive",
-        "Clear — straighten and push",
-        "Out of the hairpin — build speed",
-    ],
-    "SWEEPING": [
-        "Sweeper done — carry momentum",
-        "Clear — stay committed through",
-        "Exit — hold your line out",
-    ],
-    "FEEDER": [
-        "Set up now — tight corner coming",
-        "Position yourself — next corner ahead",
-        "Feeder done — prepare your entry",
+    "bog": [
+        "Bogged it — carry more speed to link corner {next}",
+        "Killed your momentum — slow into corner {next}",
+        "Too much scrub on exit — drive it out",
+        "Lost drive on exit — keep it lit into corner {next}",
     ],
 }
+
+
+def is_manji(yaw_window, amp: float = 0.5, min_reversals: int = 2) -> bool:
+    """True if the yaw trace swayed both directions (manji / transition) — an intentional
+    technique, not a mistake. Mistakes are one-directional; manji reverses sign repeatedly."""
+    signs = [1 if v > amp else (-1 if v < -amp else 0) for v in yaw_window]
+    signs = [s for s in signs if s != 0]
+    reversals = sum(1 for a, b in zip(signs, signs[1:]) if a != b)
+    return reversals >= min_reversals
 
 CALLOUTS: dict[str, list[str]] = {
     "TIGHT": [
@@ -131,6 +135,8 @@ class CornerApproachDetector:
         self._clip_hit: set[int] = set()
         self._approach_speeds: dict[int, list[float]] = {}  # corner_idx -> [speed, ...]
         self._recent: deque[str] = deque(maxlen=3)  # anti-repeat: no line repeats within 3 callouts
+        self._exit_flags: deque = deque(maxlen=60)  # rolling ~1s of exit mistake flags
+        self._exit_yaw: deque = deque(maxlen=60)    # rolling ~1s of yaw for manji detection
         self._track_slug: str = ""
         self._loaded = False
 
@@ -237,25 +243,42 @@ class CornerApproachDetector:
                 return True
         return False
 
-    def check_exit(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
+    # Which mistake wins if several flagged during the exit window (most urgent first).
+    _EXIT_PRIORITY = [("SNAP_RISK", "snap"), ("LOSING_ANGLE", "dropped"), ("SPEED_LOSS", "bog")]
+
+    def check_exit(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0,
+                   mistake_flag: Optional[str] = None) -> Optional[str]:
         if not self._loaded or speed_kmh < 10:
             return None
-        if abs(yaw_rate) < EXIT_YAW_THRESHOLD:
-            return None
+
+        # Accumulate the rolling drift-phase history every frame.
+        self._exit_flags.append(mistake_flag)
+        self._exit_yaw.append(yaw_rate)
+
         for i, corner in enumerate(self._corners):
             ex = corner.get("exit_x")
             ez = corner.get("exit_z")
             if ex is None or ez is None:
                 continue
-            corner_type = corner.get("type", "MEDIUM")
             dist = _dist(x, z, ex, ez)
             if dist <= CORNER_EXIT_RADIUS_M:
                 if i not in self._exit_triggered:
                     self._exit_triggered.add(i)
-                    return self._pick(EXIT_CALLOUTS.get(corner_type, EXIT_CALLOUTS["MEDIUM"]))
+                    return self._exit_mistake_callout(i)
             elif dist > CORNER_EXIT_RADIUS_M * REARM_MARGIN:
                 self._exit_triggered.discard(i)
         return None
+
+    def _exit_mistake_callout(self, corner_idx: int) -> Optional[str]:
+        # Manji / drifting the straight to transition is intentional — never a mistake.
+        if is_manji(self._exit_yaw):
+            return None
+        flags = set(f for f in self._exit_flags if f)
+        for label, key in self._EXIT_PRIORITY:
+            if label in flags:
+                next_num = (corner_idx + 1) % len(self._corners) + 1
+                return self._pick(EXIT_MISTAKE_CALLOUTS[key]).format(next=next_num)
+        return None  # clean exit — stay silent
 
     def check_clips(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0) -> Optional[str]:
         if not self._clip_zones or speed_kmh < 10:

@@ -118,12 +118,13 @@ class VoiceCoach:
     def is_in_corner(self, x: float, z: float) -> bool:
         return self._approach.is_in_corner(x, z)
 
-    def check_exit(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool, yaw_rate: float = 0.0):
+    def check_exit(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool,
+                   yaw_rate: float = 0.0, mistake_flag: str | None = None):
         if not self.enabled or not self.approach_enabled:
             return
         if is_in_pit or not is_engine_running:
             return
-        text = self._approach.check_exit(x, z, speed_kmh, yaw_rate)
+        text = self._approach.check_exit(x, z, speed_kmh, yaw_rate, mistake_flag)
         if text and self._cooldown.is_allowed("EXIT", is_in_pit, is_engine_running):
             self._cooldown.record("EXIT")
             try:

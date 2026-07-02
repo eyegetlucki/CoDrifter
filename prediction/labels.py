@@ -1,6 +1,7 @@
 import json
 import math
 import os
+from typing import Optional
 import numpy as np
 import pandas as pd
 
@@ -100,6 +101,48 @@ def _in_corner(x: float, z: float, corners: list[tuple[float, float]]) -> bool:
     return False
 
 
+def classify_drift_mistake(
+    yaw_rate: float,
+    yaw_rate_delta: float,
+    yaw_rate_mean: float,
+    yaw_rate_std: float,
+    lateral_speed: float,
+    speed: float,
+    throttle: float,
+    speed_delta: float,
+    rear_slip_mean: float,
+) -> Optional[str]:
+    """Calibrated drift-mistake rules with NO in-corner gate. Single source of truth
+    shared by label_frame (which adds the in-corner gate) and the exit/transition detector."""
+    # SNAP_RISK — rotation accelerating in the same direction it's already going.
+    # yaw_rate * yaw_rate_delta > 0 means |yaw| is GROWING (same sign) — rotating harder,
+    # not being caught. Distinguishes a real snap from a controlled high-but-held drift.
+    if (abs(yaw_rate) > SNAP_RISK_MIN_ABS_YAW
+            and abs(yaw_rate_delta) > SNAP_RISK_YAW_ACCEL
+            and (yaw_rate * yaw_rate_delta) > 0
+            and yaw_rate_std > SNAP_RISK_YAW_STD
+            and lateral_speed > SNAP_RISK_MIN_LATERAL
+            and speed > SNAP_RISK_MIN_SPEED):
+        return "SNAP_RISK"
+
+    # LOSING_ANGLE — |yaw| shrinking (either drift direction), car straightening unintentionally.
+    if ((yaw_rate * yaw_rate_delta) < 0
+            and abs(yaw_rate_delta) > LOSING_ANGLE_YAW_ACCEL
+            and abs(yaw_rate_mean) > LOSING_ANGLE_MIN_YAW
+            and throttle < LOSING_ANGLE_THROTTLE_MAX
+            and speed > LOSING_ANGLE_MIN_SPEED):
+        return "LOSING_ANGLE"
+
+    # SPEED_LOSS — bleeding speed without rear slip (not a drift, something wrong)
+    if (speed_delta < SPEED_LOSS_DELTA
+            and rear_slip_mean < SPEED_LOSS_MAX_REAR_SLIP
+            and throttle < SPEED_LOSS_THROTTLE_MAX
+            and speed > SPEED_LOSS_MIN_SPEED):
+        return "SPEED_LOSS"
+
+    return None
+
+
 def label_frame(
     speed: float,
     throttle: float,
@@ -120,39 +163,15 @@ def label_frame(
     if is_in_pit or not is_engine_running or speed < 5.0:
         return "CLEAN"
 
-    in_corner = _in_corner(world_x, world_z, corner_xz)
-
-    # SNAP_RISK — rotation accelerating in the same direction it's already going.
-    # yaw_rate * yaw_rate_delta > 0 means |yaw| is GROWING (same sign) — the car is
-    # rotating harder, not being caught. That's the signature of losing it, versus a
-    # controlled drift where yaw is high but roughly held (delta near zero / oscillating).
-    yaw_growing = (yaw_rate * yaw_rate_delta) > 0
-    if (abs(yaw_rate) > SNAP_RISK_MIN_ABS_YAW
-            and abs(yaw_rate_delta) > SNAP_RISK_YAW_ACCEL
-            and yaw_growing
-            and yaw_rate_std > SNAP_RISK_YAW_STD
-            and lateral_speed > SNAP_RISK_MIN_LATERAL
-            and speed > SNAP_RISK_MIN_SPEED):
+    mistake = classify_drift_mistake(
+        yaw_rate, yaw_rate_delta, yaw_rate_mean, yaw_rate_std,
+        lateral_speed, speed, throttle, speed_delta, rear_slip_mean,
+    )
+    # SNAP_RISK applies anywhere; LOSING_ANGLE / SPEED_LOSS only count inside a corner.
+    if mistake == "SNAP_RISK":
         return "SNAP_RISK"
-
-    if in_corner:
-        # LOSING_ANGLE — |yaw| shrinking, car straightening unintentionally.
-        # (yaw_rate * yaw_rate_delta) < 0 means rotation magnitude is dropping (either
-        # drift direction), and abs() > accel means it's dropping fast enough to be a mistake.
-        yaw_shrinking = (yaw_rate * yaw_rate_delta) < 0
-        if (yaw_shrinking
-                and abs(yaw_rate_delta) > LOSING_ANGLE_YAW_ACCEL
-                and abs(yaw_rate_mean) > LOSING_ANGLE_MIN_YAW
-                and throttle < LOSING_ANGLE_THROTTLE_MAX
-                and speed > LOSING_ANGLE_MIN_SPEED):
-            return "LOSING_ANGLE"
-
-        # SPEED_LOSS — bleeding speed without rear slip (not a drift, something wrong)
-        if (speed_delta < SPEED_LOSS_DELTA
-                and rear_slip_mean < SPEED_LOSS_MAX_REAR_SLIP
-                and throttle < SPEED_LOSS_THROTTLE_MAX
-                and speed > SPEED_LOSS_MIN_SPEED):
-            return "SPEED_LOSS"
+    if mistake in ("LOSING_ANGLE", "SPEED_LOSS") and _in_corner(world_x, world_z, corner_xz):
+        return mistake
 
     return "CLEAN"
 

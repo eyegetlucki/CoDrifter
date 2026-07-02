@@ -7,7 +7,15 @@ from dotenv import load_dotenv
 import anthropic
 
 from prediction.features import extract_features_from_df
-from prediction.labels import label_dataframe, MISTAKE_CLASSES as ALL_CLASSES, _is_real_corner
+from prediction.labels import (
+    label_dataframe, classify_drift_mistake, MISTAKE_CLASSES as ALL_CLASSES, _is_real_corner,
+)
+from voice.approach import is_manji
+
+CORNER_EXIT_RADIUS_M = 12.0
+EXIT_WINDOW = 60  # ~1s drift-phase lookback at the exit marker
+_EXIT_KEYS = {"SNAP_RISK": "snap", "LOSING_ANGLE": "dropped", "SPEED_LOSS": "bog"}
+_EXIT_PRIORITY = ["SNAP_RISK", "LOSING_ANGLE", "SPEED_LOSS"]
 
 load_dotenv()
 
@@ -80,24 +88,67 @@ def _nearest_corner(x: float, z: float, corners: list[dict]) -> int | None:
     return best
 
 
-def _detect_mistakes(df: pd.DataFrame, corners: list[dict]) -> tuple[dict, dict, dict]:
+def _detect_transitions(feats, raw, corners: list[dict]) -> dict:
+    """Windowed exit/transition mistakes attributed to the link Corner N -> N+1.
+    Mirrors the live exit detector: at each corner's exit marker, look back ~1s of the
+    drift phase, suppress manji, and record the highest-priority mistake."""
+    links: dict[int, dict] = {}
+    if not corners or "world_position_x" not in raw.columns:
+        return links
+    yaw = feats["yaw_rate"].values
+    ydelta = np.diff(yaw, prepend=yaw[0])
+    ymean = feats["yaw_rate_mean"].values; ystd = feats["yaw_rate_std"].values
+    lat = feats["lateral_speed"].values; spd = feats["speed_kmh"].values
+    thr = feats["throttle"].values; sdel = feats["speed_delta"].values; rs = feats["rear_slip_mean"].values
+    wx = raw["world_position_x"].values; wz = raw["world_position_z"].values
+    flags = [classify_drift_mistake(yaw[i], ydelta[i], ymean[i], ystd[i], lat[i], spd[i], thr[i], sdel[i], rs[i])
+             for i in range(len(feats))]
+    exits = [(i, c.get("exit_x"), c.get("exit_z")) for i, c in enumerate(corners) if "exit_x" in c]
+    triggered = set()
+    for i in range(len(feats)):
+        if spd[i] < 10:
+            continue
+        for ci, ex, ez in exits:
+            d = math.hypot(wx[i] - ex, wz[i] - ez)
+            if d <= CORNER_EXIT_RADIUS_M and ci not in triggered:
+                triggered.add(ci)
+                lo = max(0, i - EXIT_WINDOW)
+                if is_manji(yaw[lo:i + 1]):
+                    continue
+                win = set(f for f in flags[lo:i + 1] if f)
+                for label in _EXIT_PRIORITY:
+                    if label in win:
+                        nxt = (ci + 1) % len(corners) + 1
+                        entry = links.setdefault(ci, {"next": nxt, "mistakes": {}})
+                        k = _EXIT_KEYS[label]
+                        entry["mistakes"][k] = entry["mistakes"].get(k, 0) + 1
+                        break
+            elif d > CORNER_EXIT_RADIUS_M * 1.4:
+                triggered.discard(ci)
+    return links
+
+
+def _detect_mistakes(df: pd.DataFrame, corners: list[dict]) -> tuple[dict, dict, dict, dict]:
     """Run the real label pipeline and attribute mistakes to corners.
 
-    Returns (total_events, per_corner_events, per_corner_anglehold) where an 'event' is a
-    rising edge into a non-CLEAN label (matching the old edge-count semantics).
+    Returns (total_events, per_corner_events, per_corner_anglehold, transitions) where an
+    'event' is a rising edge into a non-CLEAN label. transitions holds exit/link mistakes.
     """
     total = {k: 0 for k in MISTAKE_CLASSES}
     per_corner: dict[int, dict] = {}
     anglehold: dict[int, dict] = {}
+    transitions: dict = {}
 
     if len(df) < 60:
-        return total, per_corner, anglehold
+        return total, per_corner, anglehold, transitions
 
     feats = extract_features_from_df(df)
     if len(feats) == 0:
-        return total, per_corner, anglehold
+        return total, per_corner, anglehold, transitions
     labels = label_dataframe(df, feats).reset_index(drop=True)
+    feats = feats.reset_index(drop=True)
     raw = df.tail(len(feats)).reset_index(drop=True)
+    transitions = _detect_transitions(feats, raw, corners)
 
     label_names = labels.map(lambda i: ALL_CLASSES[i])
     prev = "CLEAN"
@@ -120,7 +171,7 @@ def _detect_mistakes(df: pd.DataFrame, corners: list[dict]) -> tuple[dict, dict,
                 pc[name] += 1
         prev = name
 
-    return total, per_corner, anglehold
+    return total, per_corner, anglehold, transitions
 
 
 def _ms_to_time(ms: int) -> str:
@@ -180,7 +231,7 @@ def _summarize_session(df: pd.DataFrame) -> dict:
     # Mistake detection — reuse the calibrated label pipeline (single source of truth),
     # attributed to the active track's corners for actionable, corner-specific coaching.
     track_name, corners = _load_active_corner_map()
-    total_events, per_corner_events, per_corner_anglehold = _detect_mistakes(df, corners)
+    total_events, per_corner_events, per_corner_anglehold, transitions = _detect_mistakes(df, corners)
 
     # Build a readable per-corner breakdown: mistakes + sustained angle per corner
     per_corner = {}
@@ -193,6 +244,14 @@ def _summarize_session(df: pd.DataFrame) -> dict:
             "avg_angle_rad_s": round(ah["sum"] / ah["n"], 3) if ah and ah["n"] else 0.0,
         }
         per_corner[f"Corner {ci + 1}"] = entry
+
+    # Transition/link mistakes: exiting Corner N into Corner N+1 (drifting links the track)
+    exit_labels = {"dropped": "lost the drift on exit", "snap": "overcooked the exit", "bog": "bogged the exit"}
+    links = {}
+    for ci, info in sorted(transitions.items()):
+        m = {exit_labels.get(k, k): v for k, v in info["mistakes"].items() if v > 0}
+        if m:
+            links[f"Corner {ci + 1} into corner {info['next']}"] = m
 
     return {
         "total_laps": completed_laps,
@@ -214,6 +273,7 @@ def _summarize_session(df: pd.DataFrame) -> dict:
         "track_name": track_name or "Unknown track",
         "mistake_events": total_events,
         "per_corner": per_corner,
+        "transitions": links,
     }
 
 
@@ -236,6 +296,14 @@ Previous session for comparison:
             lines.append(f"  - {cname} ({info['type']}): avg angle {info['avg_angle_rad_s']} rad/s | {mistakes}")
         per_corner_block = "\n- Per-corner breakdown (higher avg angle = more committed drift):\n" + "\n".join(lines)
 
+    transitions_block = ""
+    if summary.get("transitions"):
+        tlines = []
+        for link, m in summary["transitions"].items():
+            tlines.append(f"  - {link}: " + ", ".join(f"{k} x{v}" for k, v in m.items()))
+        transitions_block = ("\n- Transitions / links (drifting links the whole track — these are "
+                             "mistakes exiting one corner that hurt the entry to the next):\n" + "\n".join(tlines))
+
     return f"""You are a drift racing coach reviewing a session on {summary.get('track_name', 'this track')}.
 Analyze the telemetry summary below and return a structured JSON debrief.
 
@@ -255,7 +323,7 @@ SESSION TELEMETRY SUMMARY:
 - Detected mistake events:
   - Losing drift angle (car straightening out mid-corner): {summary['mistake_events']['LOSING_ANGLE']}
   - Scrubbing off too much speed: {summary['mistake_events']['SPEED_LOSS']}
-  - About to lose the rear (rotation running away faster than it's being caught): {summary['mistake_events']['SNAP_RISK']}{per_corner_block}
+  - About to lose the rear (rotation running away faster than it's being caught): {summary['mistake_events']['SNAP_RISK']}{per_corner_block}{transitions_block}
 {prev_block}
 Return ONLY valid JSON — no markdown, no explanation, no prefix text. Schema:
 {{
@@ -284,6 +352,10 @@ consistency_score: 1.0 = perfectly consistent laps, 0.0 = wildly inconsistent.
 improvements: exactly 3 drift-specific, actionable coaching points. When the per-corner
 breakdown shows a corner with the most mistakes or the lowest sustained angle, name that
 specific corner (e.g. "You kept straightening out through Corner 3 — commit throttle earlier on exit").
+If the Transitions / links section shows repeated mistakes exiting one corner into the next, coach
+the LINK — in drifting the goal is to drift the whole track connected, so call out keeping the drift
+alive from one corner into the next (e.g. "You keep dropping it exiting Corner 2 — stay committed so
+you carry the angle into Corner 3").
 coaching_tip: one specific thing to focus on next session, referencing a corner if the data points to one.
 vs_previous_session: compare to the previous session if data was provided, otherwise "First session".
 
@@ -405,6 +477,13 @@ def _print_debrief(debrief: dict, summary: dict):
         for cname, info in per_corner.items():
             mistakes = ", ".join(f"{_plain(k)} x{v}" for k, v in info["mistakes"].items()) or "clean"
             print(f"    {cname} ({info['type']}): avg angle {info['avg_angle_rad_s']} rad/s  -  {mistakes}")
+        print()
+
+    trans = summary.get("transitions", {})
+    if trans:
+        print("  TRANSITIONS / LINKS:")
+        for link, m in trans.items():
+            print(f"    {link}:  " + ", ".join(f"{k} x{v}" for k, v in m.items()))
         print()
 
     print("  TOP 3 IMPROVEMENTS:")
