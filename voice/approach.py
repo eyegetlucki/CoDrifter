@@ -34,13 +34,13 @@ MIN_PASSES_FOR_SPEED_CTX = 3     # passes needed before speed context activates
 MAX_SPEED_HISTORY       = 20     # max passes stored per corner
 
 # Angle-depth coaching (learned per-corner sustained angle)
-MIN_PASSES_FOR_ANGLE = 3         # corner passes needed before angle coaching activates
+MIN_PASSES_FOR_ANGLE = 5         # corner passes needed before angle coaching activates (stable baseline)
 MAX_ANGLE_HISTORY    = 20        # learned angle samples kept per corner
 ANGLE_MIN_SAMPLES    = 20        # frames in a pass before we judge its angle
 SHALLOW_RATIO        = 0.75      # below 75% of your norm = genuinely too shallow
 DEEP_RATIO           = 1.4       # above 140% of your norm = overcooking
 GOOD_RATIO           = 1.1       # clearly above your norm with no mistake = a good committed corner
-POSITIVE_ONE_IN_N    = 3         # praise ~1 of every N eligible corners
+POSITIVE_ONE_IN_N    = 2         # praise ~1 of every N eligible corners
 SAVE_STEER           = 0.7       # peak opposite-lock steering that counts as a real save
 
 # Mid-link "lost the drift" detection (geometry-gated so reset straights never trigger)
@@ -49,6 +49,11 @@ STRAIGHT_YAW   = 0.3             # rad/s — below this = straightened out
 STRAIGHT_HOLD  = 30              # frames (~0.5s) of sustained straighten before firing
 LINK_MIN_SPEED = 40.0           # only flag lost links while still at drift speed
 WAS_DRIFTING_YAW = 0.7          # peak yaw that confirms you were actually drifting
+
+# Spin vs transition + precision gating
+SPIN_FWD_VEL     = -1.0          # local forward velocity below this = car backwards = spun
+EXIT_MIN_FLAGGED = 5             # flagged frames in the exit window before an exit call fires
+ROUTINE_EVERY    = 3             # fire the routine corner-type approach callout 1 of every N passes
 
 
 def _dist(x1: float, z1: float, x2: float, z2: float) -> float:
@@ -87,36 +92,56 @@ def is_manji(yaw_window, amp: float = 0.5, min_reversals: int = 2) -> bool:
     reversals = sum(1 for a, b in zip(signs, signs[1:]) if a != b)
     return reversals >= min_reversals
 
+
+def is_transition(yaw_window, spun: bool) -> bool:
+    """Intentional linking flick (exit one corner -> flick into the next): a single yaw
+    sign-reversal while STILL GOING FORWARD. A real spin (forward velocity negative) is not
+    a transition. Used to suppress snap/mistake calls when the driver is just linking corners."""
+    return (not spun) and is_manji(yaw_window, min_reversals=1)
+
 CALLOUTS: dict[str, list[str]] = {
     "TIGHT": [
         "Tight corner — get your angle early",
         "Sharp turn — initiate now",
         "Tight one coming — set the rear",
         "Get sideways early — it's tight",
+        "Tight here — big flick, commit",
+        "Snap it in — this one's tight",
+        "Short and sharp — rotate hard",
     ],
     "MEDIUM": [
         "Medium corner — smooth entry",
         "Set your line — corner ahead",
         "Rotate and carry — medium turn",
         "Corner coming — control your angle",
+        "Steady one here — flow through it",
+        "Medium turn — build your angle",
+        "Nice open corner — commit to it",
     ],
     "SWEEPING": [
         "Sweeping turn — maintain your angle",
         "Long curve — stay committed",
         "Sweeper ahead — hold the drift",
         "Gradual turn — smooth throttle",
+        "Big sweeper — carry it all the way",
+        "Long one — hold your angle out",
+        "Sweeping bend — stay patient on it",
     ],
     "HAIRPIN": [
         "Hairpin — scrub speed and flick",
         "Sharp hairpin — get the rotation early",
         "Hairpin coming — slow in, drift out",
         "Tight hairpin — maximum rotation needed",
+        "Hairpin — big angle, slow it down",
+        "Wrap it around — hairpin here",
     ],
     "FEEDER": [
         "Slight turn — set up for the next corner",
         "Feeder corner — position yourself early",
         "Easy bend — get your line for what's next",
         "Light turn — feed into the next one",
+        "Small kink — line up the next one",
+        "Gentle turn — set up early",
     ],
 }
 
@@ -194,9 +219,14 @@ class CornerApproachDetector:
         self._cur_had_mistake: dict[int, bool] = {}
         self._cur_had_snap: dict[int, bool] = {}
         self._cur_max_cs: dict[int, float] = {}            # peak countersteer this pass (for saves)
+        self._cur_botched: dict[int, bool] = {}            # spun / speed-collapsed this pass
+        self._cur_max_speed: dict[int, float] = {}         # for hard speed-collapse detection
+        self._cur_min_speed: dict[int, float] = {}
         self._angle_fired: set[int] = set()
         self._in_zone: set[int] = set()
         self._praise_counter: int = 0
+        self._approach_count: dict[int, int] = {}          # passes per corner (routine callout throttle)
+        self._exit_spun: deque = deque(maxlen=60)          # rolling spun state for exit transition guard
         # Mid-link lost-drift watching
         self._link_len: dict[int, float] = {}              # link i -> distance exit_i..entry_{i+1}
         self._link_watch: dict[int, dict] = {}             # active watches -> {"straight": n, "fired": bool}
@@ -299,17 +329,19 @@ class CornerApproachDetector:
         if len(history) > MAX_SPEED_HISTORY:
             self._approach_speeds[corner_idx] = history[-MAX_SPEED_HISTORY:]
 
-    def _context_callout(self, corner_idx: int, corner_type: str, speed_kmh: float, yaw_rate: float) -> str:
-        # Only override the standard callout when the driver is genuinely hot vs their
-        # own learned average for this corner. Being straight on approach is normal, so
-        # there's no "you should be rotating" nag — the type callouts carry that coaching.
+    def _context_callout(self, corner_idx: int, corner_type: str, speed_kmh: float, yaw_rate: float) -> Optional[str]:
+        # Hot warnings ALWAYS fire (they're notable). The routine corner-type callout only
+        # fires 1 of every ROUTINE_EVERY passes so "corner ahead" doesn't repeat every lap.
         avg = self._avg_approach_speed(corner_idx)
         if avg is not None and speed_kmh > avg * HOT_MULTIPLIER:
             if abs(yaw_rate) >= YAW_INITIATED_THRESHOLD:
                 return self._pick(CONTEXT_CALLOUTS["hot_has_angle"])   # hot but already rotating
             return self._pick(CONTEXT_CALLOUTS["hot_no_angle"])        # hot and still straight
 
-        # Normal approach — standard corner-type callout
+        n = self._approach_count.get(corner_idx, 0) + 1
+        self._approach_count[corner_idx] = n
+        if n % ROUTINE_EVERY != 1:   # fire on pass 1, 4, 7, ... — skip the rest
+            return None
         return self._pick(CALLOUTS.get(corner_type, CALLOUTS["MEDIUM"]))
 
     def is_in_corner(self, x: float, z: float) -> bool:
@@ -324,13 +356,14 @@ class CornerApproachDetector:
     _EXIT_PRIORITY = [("SNAP_RISK", "snap"), ("LOSING_ANGLE", "dropped"), ("SPEED_LOSS", "bog")]
 
     def check_exit(self, x: float, z: float, speed_kmh: float, yaw_rate: float = 0.0,
-                   mistake_flag: Optional[str] = None) -> Optional[str]:
+                   mistake_flag: Optional[str] = None, spun: bool = False) -> Optional[str]:
         if not self._loaded or speed_kmh < 10:
             return None
 
         # Accumulate the rolling drift-phase history every frame.
         self._exit_flags.append(mistake_flag)
         self._exit_yaw.append(yaw_rate)
+        self._exit_spun.append(spun)
 
         for i, corner in enumerate(self._corners):
             ex = corner.get("exit_x")
@@ -380,12 +413,17 @@ class CornerApproachDetector:
         return None
 
     def _exit_mistake_callout(self, corner_idx: int) -> Optional[str]:
-        # Manji / drifting the straight to transition is intentional — never a mistake.
-        if is_manji(self._exit_yaw):
+        # Intentional transition (flick into the next corner, still going forward) is not a
+        # mistake. A real spin (forward-negative) is not a transition and still gets called.
+        if is_transition(self._exit_yaw, any(self._exit_spun)):
             return None
-        flags = set(f for f in self._exit_flags if f)
+        # Require the mistake to be sustained (not a one-frame blip) before calling it.
+        counts = {}
+        for f in self._exit_flags:
+            if f:
+                counts[f] = counts.get(f, 0) + 1
         for label, key in self._EXIT_PRIORITY:
-            if label in flags:
+            if counts.get(label, 0) >= EXIT_MIN_FLAGGED:
                 next_num = (corner_idx + 1) % len(self._corners) + 1
                 return self._pick(EXIT_MISTAKE_CALLOUTS[key]).format(next=next_num)
         return None  # clean exit — stay silent
@@ -444,7 +482,7 @@ class CornerApproachDetector:
     # ── Angle-depth coaching, positive reinforcement, mid-link (one per-frame entry) ──
 
     def check_corner(self, x: float, z: float, speed_kmh: float, yaw_rate: float,
-                     steering: float, mistake_flag: Optional[str]) -> Optional[tuple]:
+                     steering: float, mistake_flag: Optional[str], spun: bool = False) -> Optional[tuple]:
         """Returns (kind, text) where kind is 'LINK' | 'ANGLE' | 'PRAISE', or None.
         Accumulates per-corner-pass state and emits at most one coaching line per frame."""
         if not self._loaded or speed_kmh < 10:
@@ -465,12 +503,19 @@ class CornerApproachDetector:
                     self._cur_had_mistake[i] = False
                     self._cur_had_snap[i] = False
                     self._cur_max_cs[i] = 0.0
+                    self._cur_botched[i] = False
+                    self._cur_max_speed[i] = speed_kmh
+                    self._cur_min_speed[i] = speed_kmh
                     self._angle_fired.discard(i)
                 self._cur_angle[i].append(ay)
                 if mistake_flag:
                     self._cur_had_mistake[i] = True
                 if mistake_flag == "SNAP_RISK":
                     self._cur_had_snap[i] = True
+                if spun:
+                    self._cur_botched[i] = True
+                self._cur_max_speed[i] = max(self._cur_max_speed[i], speed_kmh)
+                self._cur_min_speed[i] = min(self._cur_min_speed[i], speed_kmh)
                 if steering * yaw_rate < 0:  # countersteering
                     self._cur_max_cs[i] = max(self._cur_max_cs[i], abs(steering))
             elif i in self._in_zone and d > CORNER_ACTIVE_RADIUS_M * REARM_MARGIN:
@@ -497,10 +542,15 @@ class CornerApproachDetector:
         hist = self._corner_angles.get(i, [])
         learned = (sum(hist) / len(hist)) if len(hist) >= MIN_PASSES_FOR_ANGLE else None
 
-        # Record this pass's sustained angle into the learned history.
-        self._corner_angles.setdefault(i, []).append(sustained)
-        if len(self._corner_angles[i]) > MAX_ANGLE_HISTORY:
-            self._corner_angles[i] = self._corner_angles[i][-MAX_ANGLE_HISTORY:]
+        # A spun / speed-collapsed pass is not a valid angle sample — don't learn from it
+        # (a spin's huge yaw would corrupt the norm) and never praise it.
+        botched = self._cur_botched.get(i) or (
+            self._cur_max_speed.get(i, 0.0) > 0 and self._cur_min_speed.get(i, 0.0) < 0.5 * self._cur_max_speed.get(i, 1.0)
+        )
+        if not botched:
+            self._corner_angles.setdefault(i, []).append(sustained)
+            if len(self._corner_angles[i]) > MAX_ANGLE_HISTORY:
+                self._corner_angles[i] = self._corner_angles[i][-MAX_ANGLE_HISTORY:]
 
         if learned is None:  # still warming up
             return None
@@ -508,8 +558,10 @@ class CornerApproachDetector:
         # Angle coaching (corrective) first.
         if sustained < learned * SHALLOW_RATIO:
             return ("ANGLE", self._pick(ANGLE_CALLOUTS["shallow"]))
-        if sustained > learned * DEEP_RATIO and not self._cur_had_snap.get(i):
+        if not botched and sustained > learned * DEEP_RATIO and not self._cur_had_snap.get(i):
             return ("ANGLE", self._pick(ANGLE_CALLOUTS["deep"]))
+        if botched:
+            return None  # spun/botched — no praise
 
         # Otherwise, rare earned praise.
         recovered = 0.4 <= (sum(cur[-10:]) / len(cur[-10:])) <= 1.6

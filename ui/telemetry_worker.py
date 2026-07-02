@@ -9,7 +9,7 @@ from prediction.features import FeatureExtractor
 from prediction.model import MistakePredictor
 from prediction.labels import classify_drift_mistake
 from voice.coach import VoiceCoach
-from voice.approach import is_manji
+from voice.approach import is_transition, SPIN_FWD_VEL
 from ui.settings_manager import SettingsManager
 
 SESSIONS_DIR = os.path.join("data", "sessions")
@@ -85,7 +85,8 @@ class TelemetryWorker(QObject):
         frame_count = 0
         last_prediction = "CLEAN"
         prev_yaw = 0.0
-        yaw_win: deque = deque(maxlen=30)  # ~0.5s of yaw for the live manji guard
+        yaw_win: deque = deque(maxlen=30)   # ~0.5s of yaw for the transition guard
+        flag_win: deque = deque(maxlen=8)   # recent per-frame rule flags for model agreement
 
         def on_frame(frame: TelemetryFrame, count: int):
             nonlocal last_prediction, frame_count, prev_yaw
@@ -107,6 +108,7 @@ class TelemetryWorker(QObject):
 
             # Per-frame drift-mistake flag (gate-free) for the exit/transition detector.
             yaw_win.append(frame.yaw_rate)
+            spun = frame.local_velocity_z < SPIN_FWD_VEL   # car moving backwards = spun
             exit_flag = None
             if fv is not None:
                 yaw_delta = fv.yaw_rate - prev_yaw
@@ -114,6 +116,7 @@ class TelemetryWorker(QObject):
                     fv.yaw_rate, yaw_delta, fv.yaw_rate_mean, fv.yaw_rate_std,
                     fv.lateral_speed, fv.speed_kmh, fv.throttle, fv.speed_delta, fv.rear_slip_mean,
                 )
+            flag_win.append(exit_flag)
             prev_yaw = frame.yaw_rate
 
             self._coach.check_approach(
@@ -129,12 +132,12 @@ class TelemetryWorker(QObject):
             self._coach.check_exit(
                 frame.world_position_x, frame.world_position_z, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
-                yaw_rate=frame.yaw_rate, mistake_flag=exit_flag,
+                yaw_rate=frame.yaw_rate, mistake_flag=exit_flag, spun=spun,
             )
             self._coach.check_coaching(
                 frame.world_position_x, frame.world_position_z, frame.speed_kmh,
                 frame.is_in_pit, frame.is_engine_running,
-                yaw_rate=frame.yaw_rate, steering=frame.steering_angle, mistake_flag=exit_flag,
+                yaw_rate=frame.yaw_rate, steering=frame.steering_angle, mistake_flag=exit_flag, spun=spun,
             )
 
             prediction_type = "CLEAN"
@@ -145,9 +148,12 @@ class TelemetryWorker(QObject):
                 if pred:
                     prediction_type = pred.mistake_type
                     prediction_conf = pred.confidence
-                    # Manji / drifting the straight to transition is intentional — don't
-                    # flag it as a mistake (rhythmic yaw sway, not a one-directional error).
-                    if pred.is_mistake and not is_manji(yaw_win):
+                    # Fire only if: model confirms a mistake, the calibrated rule corroborates
+                    # it (grounds the call in truth), and it's not an intentional transition
+                    # flick (quick linking, not a spin). A real spin still calls out.
+                    if (pred.is_mistake
+                            and pred.mistake_type in flag_win
+                            and not is_transition(yaw_win, spun)):
                         self._coach.call_out(pred.mistake_type, frame.is_in_pit, frame.is_engine_running)
 
             if count % 6 == 0:  # ~10hz UI update

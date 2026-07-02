@@ -121,12 +121,12 @@ class VoiceCoach:
         return self._approach.is_in_corner(x, z)
 
     def check_exit(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool,
-                   yaw_rate: float = 0.0, mistake_flag: str | None = None):
+                   yaw_rate: float = 0.0, mistake_flag: str | None = None, spun: bool = False):
         if not self.enabled or not self.approach_enabled:
             return
         if is_in_pit or not is_engine_running:
             return
-        text = self._approach.check_exit(x, z, speed_kmh, yaw_rate, mistake_flag)
+        text = self._approach.check_exit(x, z, speed_kmh, yaw_rate, mistake_flag, spun)
         if text and self._cooldown.is_allowed("EXIT", is_in_pit, is_engine_running):
             self._cooldown.record("EXIT")
             try:
@@ -147,16 +147,17 @@ class VoiceCoach:
             except queue.Full:
                 pass
 
-    PRAISE_COOLDOWN = 20.0  # seconds — keep positive callouts rare
+    PRAISE_COOLDOWN = 12.0  # seconds — keep positive callouts rare but heard
 
     def check_coaching(self, x: float, z: float, speed_kmh: float, is_in_pit: bool, is_engine_running: bool,
-                       yaw_rate: float = 0.0, steering: float = 0.0, mistake_flag: str | None = None):
+                       yaw_rate: float = 0.0, steering: float = 0.0, mistake_flag: str | None = None,
+                       spun: bool = False):
         """Angle-depth coaching, positive reinforcement, and mid-link lost-drift — one call."""
         if not self.enabled or not self.approach_enabled:
             return
         if is_in_pit or not is_engine_running:
             return
-        result = self._approach.check_corner(x, z, speed_kmh, yaw_rate, steering, mistake_flag)
+        result = self._approach.check_corner(x, z, speed_kmh, yaw_rate, steering, mistake_flag, spun)
         if not result:
             return
         kind, text = result  # kind: "LINK" | "ANGLE" | "PRAISE"
