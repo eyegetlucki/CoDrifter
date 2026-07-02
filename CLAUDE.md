@@ -433,11 +433,31 @@ Debrief overhaul (`debrief/claude_debrief.py`):
 - Plain-English labels — `MISTAKE_LABELS`/`_plain()`: LOSING_ANGLE="losing drift angle", SPEED_LOSS="scrubbing off too much speed", SNAP_RISK="about to lose the rear" (the warning moment BEFORE a spin). Claude is instructed to never use the internal codes in prose. `ui/debrief_tab.py` imports `_plain` for stat blocks. The `mistake_frequency` JSON keys stay canonical for the code/UI contract.
 - Avoid non-ASCII (×, →, —) in terminal-printed strings — Windows cp1252 console raises UnicodeEncodeError. Use plain `x`, `-`.
 
-Environment/build fixes:
-- `voice/coach.py`: audio playback switched from `elevenlabs.play()` (spawned an mpg123/ffplay **console window** on Windows) to `sounddevice` with `pcm_44100` output. `requirements.txt`: `sounddevice==0.5.5`, `cffi==2.0.0`, `pycparser==3.0`. `build.spec`: `collect_all("sounddevice")` + `collect_all("cffi")` (bundles PortAudio DLL + CFFI backend — hiddenimports alone is insufficient).
-- `httpx==0.27.2` pinned — `anthropic==0.25.8` passes `proxies=` which httpx 0.28 removed; the debrief crashed on `anthropic.Anthropic()` init in any env with newer httpx.
+YAW UNITS — `yaw_rate` from AC is **rad/s** (`p.localAngularVel[1]`), max ~2.4, drift p50~0.65. NOT deg/s.
+- Bug that shipped and was fixed: `voice/approach.py` had `YAW_INITIATED_THRESHOLD=10` / `EXIT_YAW_THRESHOLD=15` labeled "deg/s" but compared against rad/s → never true → approach always thought "not initiated" (constant "need rotation" spam) and exit/clip callouts NEVER fired. Fixed to rad/s: both 0.4. All yaw thresholds project-wide are rad/s.
 
-Current app version: **v1.0.12**. Retrain in the standalone app (active track = Klutch Kickers) to bake the calibrated labels into the live model.
+Callout system (current — `voice/approach.py`, `voice/callouts.py`):
+- **Anti-repeat**: `_pick()` (approach) + module deque (`callouts.py`) — no line repeats within any 3 consecutive callouts.
+- **Approach = hot-only**. Normal approaches get the standard corner-type callout; only override when `speed > learned_avg * HOT_MULTIPLIER (1.2)`. The old "get sideways/need rotation" nag was REMOVED (yaw-unit bug + premature). Per-corner approach-speed learning persists in `data/track_learning/<slug>.json`.
+- **Exit = corrective-only + next-corner framed**. Fires only on an exit mistake (dropped/snap/bog), never clean exits. Windowed-at-marker: ~1s look-back of per-frame flags, priority snap>dropped>bog, text names the NEXT corner (drifting links the whole track).
+- **`classify_drift_mistake()`** in `labels.py` = the calibrated SNAP/LOSING/SPEED rules with NO in-corner gate — single source of truth. `label_frame` reuses it (keeps its in-corner gate). The worker computes a per-frame flag from the live feature vector and feeds exit + coaching.
+- **Manji guard** — `is_manji(yaw_window)` = ≥2 sign reversals among `|yaw|>0.5` (intentional multi-directional sway). Suppresses exit callouts AND live mistake callouts. Mistakes are one-directional; manji is not. Zero false-suppression on real data.
+- **Angle-depth coaching** — learns per-corner SUSTAINED angle (top-half of `|yaw|`, ignores entry/exit ramps) in `_corner_angles` (persisted). Judged at corner COMPLETION (mid-corner judged the entry ramp → false-flagged ~every corner). `SHALLOW_RATIO=0.75` → "more angle", `DEEP_RATIO=1.4` → "ease it". ~17% of passes.
+- **Positive reinforcement (rare)** — praise a clean corner held `>1.1×` norm, or a save (snap flag recovered + peak opposite-lock steering `>0.7`). `PRAISE_COOLDOWN=20s` + 1-in-`POSITIVE_ONE_IN_N (3)`. Countersteer does NOT sharpen snap (100% of snaps already countersteer) — used for saves only.
+- **Mid-link lost-drift** — catches straightening on the link BETWEEN corners (model is corner-gated). Geometry-gated: only links `<MAX_LINK_LEN (70m)` watched, so long/reset straights auto-exclude. Requires was-drifting (`peak |yaw|>0.7`) then sustained 0.5s straighten at speed, not manji. Frames toward next corner.
+- `coach.check_coaching()` routes ANGLE/PRAISE/LINK via cooldowns; worker passes steering + the flag.
+- Debrief `_detect_transitions` attributes exit mistakes to the link Corner N→N+1 ("Transitions/links" section) so Claude coaches on linking. Plain-English, manji-suppressed.
+- Front-slip understeer is NOT viable in drift (0.1% of frames — rear always loose). Don't pursue.
+
+Environment/build fixes:
+- `voice/coach.py` audio — FINAL working path: request `mp3_44100_128` (works on ALL ElevenLabs tiers), decode in-process with **miniaudio**, play via `sounddevice`. NO subprocess = no console window. `pcm_44100` was a bug (needs Pro tier → silent failure on lower tiers). `requirements.txt`: `sounddevice==0.5.5`, `miniaudio==1.71`, `cffi==2.0.0`, `pycparser==3.0`. `build.spec`: `collect_all` for sounddevice/cffi/miniaudio (bundles native binaries — hiddenimports alone is insufficient).
+- `voice/coach.py` logs to `data/coach.log` (packaged app is `console=False` so voice errors were invisible).
+- `httpx==0.27.2` pinned — `anthropic==0.25.8` passes `proxies=` which httpx 0.28 removed; debrief crashed on client init.
+- **Voice Volume** setting now works (was saved but never read): coach takes a 0.0–1.0 gain, `_speak` scales the audio; slider emits `settings_changed` → `reload_settings` → live update.
+- **Gear display** fixed: AC encodes gear `0=Reverse, 1=Neutral, 2=1st`; dashboard maps `0→R, 1→N, n→n-1` (was raw, off by one). Raw value stays in the CSV (training unaffected).
+- Avoid non-ASCII (×, →, —) in **terminal-printed** strings — Windows cp1252 console raises `UnicodeEncodeError`. Use plain `x`, `-`.
+
+Current app version: **v1.0.12** was the last confirmed install. Many changes have landed since (audio mp3 fix, volume, gear, exit/transition + manji + angle/positive/mid-link coaching) — run `python release.py patch --build` + reinstall to ship them. Rule-based coaching needs no retrain; the calibrated labels need an in-app model retrain (active track = Klutch Kickers) to affect the live model.
 
 Do not start Phase 5 until these criteria are met and confirmed.
 
