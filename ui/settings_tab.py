@@ -372,7 +372,9 @@ class SettingsTab(QWidget):
             "Voice Volume", 0, 100,
             s.get("voice_volume", 80), "%",
         )
-        self._volume.value_changed.connect(lambda v: s.set("voice_volume", v))
+        self._volume.value_changed.connect(
+            lambda v: (s.set("voice_volume", v), self.settings_changed.emit())
+        )
         cl.addWidget(self._volume)
 
         cl.addWidget(_h_sep())

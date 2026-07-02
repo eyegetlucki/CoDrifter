@@ -34,7 +34,7 @@ if not logger.handlers:
 class VoiceCoach:
     def __init__(self, enabled: bool = False, same_mistake_cooldown: float = 5.0,
                  any_callout_cooldown: float = 2.0, approach_enabled: bool = True,
-                 enabled_mistakes: dict | None = None):
+                 enabled_mistakes: dict | None = None, volume: float = 1.0):
         self._client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
         logger.info(
             "VoiceCoach init — api_key_present=%s voice_id_present=%s",
@@ -47,6 +47,7 @@ class VoiceCoach:
         self._thread.start()
         self.enabled: bool = enabled
         self.approach_enabled: bool = approach_enabled
+        self._volume: float = volume   # 0.0-1.0 playback gain
         self._track_slug: str = ""
         self.enabled_mistakes: dict = enabled_mistakes or {
             "LOSING_ANGLE": True, "SPEED_LOSS": True, "SNAP_RISK": True,
@@ -57,10 +58,12 @@ class VoiceCoach:
         self._approach.load(track_slug)
 
     def update_settings(self, same_mistake_cooldown: float, any_callout_cooldown: float,
-                        approach_enabled: bool, enabled_mistakes: dict):
+                        approach_enabled: bool, enabled_mistakes: dict, volume: float | None = None):
         self._cooldown.update_cooldowns(same_mistake_cooldown, any_callout_cooldown)
         self.approach_enabled = approach_enabled
         self.enabled_mistakes = enabled_mistakes
+        if volume is not None:
+            self._volume = volume
 
     def _speak(self, text: str):
         # mp3_44100_128 works on every ElevenLabs tier (pcm_44100 needs Pro+).
@@ -74,6 +77,7 @@ class VoiceCoach:
         ))
         decoded = miniaudio.decode(mp3)
         audio = np.frombuffer(decoded.samples, dtype=np.int16).astype(np.float32) / 32768.0
+        audio = audio * self._volume   # apply Voice Volume setting (0.0-1.0 gain)
         if decoded.nchannels > 1:
             audio = audio.reshape(-1, decoded.nchannels)
         sd.play(audio, samplerate=decoded.sample_rate)

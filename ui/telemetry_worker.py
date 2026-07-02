@@ -45,6 +45,7 @@ class TelemetryWorker(QObject):
             any_callout_cooldown=float(s.get("any_callout_cooldown", 2)),
             approach_enabled=s.get("corner_approach_enabled", True),
             enabled_mistakes=dict(s.get("mistake_callouts", {})),
+            volume=float(s.get("voice_volume", 80)) / 100.0,
         )
 
     def _build_predictor(self) -> MistakePredictor:
@@ -178,6 +179,7 @@ class TelemetryWorker(QObject):
                 any_callout_cooldown=float(s.get("any_callout_cooldown", 2)),
                 approach_enabled=s.get("corner_approach_enabled", True),
                 enabled_mistakes=dict(s.get("mistake_callouts", {})),
+                volume=float(s.get("voice_volume", 80)) / 100.0,
             )
         if self._predictor:
             threshold = self._settings.get("confidence_threshold", 90) / 100.0
